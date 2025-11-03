@@ -267,6 +267,30 @@ The transformer correctly handles Python's scoping rules:
   - In comprehensions: Walrus assignments remain available OUTSIDE of comprehensions
   - In lambdas: Walrus assignments are NOT available outside
 
+## Performance
+
+Python expressions with `safe_eval` are 5-8x slower than if the expression was called outside of the template:
+
+```py
+fn = safe_eval("a + b * c")
+fn({"a": 1, "b": 2, "c": 3})
+
+# vs
+
+fn = lambda ctx: ctx["a"] + ctx["b"] * ctx["c"]
+fn({"a": 1, "b": 2, "c": 3})
+```
+
+This is the tradeoff for all the security checks that we do, as we have to check safety of each attribute or variable access, or function call.
+
+I tried to see what would happen if I cached the results, and got about 30-50% improvement. LLM estimated that at 10,000 entries, the cache could take up ~3-5 MB. This would be relevant only to large projects, say with 500 templates, each having total of 20 tags or expressions (`{% ...%}`, `{{ }}`).
+
+- For comparison, my last work project had about ~100 templates, and that was a mid-sized app that I worked on for ~1.5 years.
+
+However, I removed this caching from this final PR. In django-components I think that it will be more meaningful to cache on the level of entire tags and expressions (`{% ...%}`, `{{ }}`), which will make the caching in `safe_eval` less relevant.
+
+Once the Python expressions are fully integrated in django-components, and we find that these Python expressions take up non-neglibible time, we could introduce the caching.
+
 ## Development
 
 ### Dependencies
