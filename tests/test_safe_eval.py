@@ -6,6 +6,14 @@ from typing import Any, Dict, List, NamedTuple
 import pytest
 from djc_core import SecurityError, safe_eval, unsafe
 
+# Check if t-strings are supported (Python 3.14+)
+try:
+    from string.templatelib import Template  # type: ignore[import-untyped]
+
+    TSTRINGS_SUPPORTED = True
+except ImportError:
+    TSTRINGS_SUPPORTED = False
+
 
 Value = NamedTuple("Value", [("value", int)])
 
@@ -1252,38 +1260,63 @@ class TestSyntax:
     def test_transform_tstring_simple(self):
         compiled = safe_eval("t'Hello {name}'")
         context = {"name": "test"}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            # On Python 3.14+, t-strings are supported and return Template objects
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     def test_transform_tstring_with_expression(self):
         compiled = safe_eval("t'Result: {x + 1}'")
         context = {"x": 10}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     def test_transform_tstring_multiple_interpolations(self):
         compiled = safe_eval("t'{x} and {y}'")
         context = {"x": 10, "y": 10}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     def test_transform_tstring_with_format_spec(self):
         compiled = safe_eval("t'start {value:.2f} end'")
         context = {"value": 100}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     def test_transform_tstring_with_conversion(self):
         compiled = safe_eval("t'start {value!r} end'")
         context = {"value": 100}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     def test_transform_tstring_with_conversion_and_format(self):
         compiled = safe_eval("t'start {value!r:>20} end'")
         context = {"value": 100}
-        with pytest.raises(NotImplementedError):
-            compiled(context)
+        if TSTRINGS_SUPPORTED:
+            result = compiled(context)
+            assert isinstance(result, Template)
+        else:
+            with pytest.raises(NotImplementedError):
+                compiled(context)
 
     # === VARIABLES ===
 
