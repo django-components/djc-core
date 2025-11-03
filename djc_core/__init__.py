@@ -10,7 +10,16 @@ if hasattr(djc_core, "__all__"):
 
 # OVERRIDES START HERE
 # Add here any additional public API that we defined purely in Python
+from djc_core.djc_safe_eval import safe_eval, unsafe, SecurityError
 from djc_core.djc_template_parser import CompiledFunc, compile_tag
 
 if hasattr(djc_core, "__all__"):
-    __all__ += ["CompiledFunc", "compile_tag"]
+    __all__ += [
+        # safe_eval
+        "safe_eval",
+        "unsafe",
+        "SecurityError",
+        # template parser
+        "CompiledFunc",
+        "compile_tag",
+    ]
