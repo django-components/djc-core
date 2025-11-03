@@ -1,7 +1,7 @@
 # ruff: noqa: E731
 import re
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import Any, Dict, List, NamedTuple
 
 import pytest
 from djc_core import SecurityError, safe_eval, unsafe
@@ -23,7 +23,7 @@ class Obj:
     start: int = 1
     end: int = 5
     nested: Nested = field(default_factory=Nested)
-    items: dict[Any, Value] = field(
+    items: Dict[Any, Value] = field(
         default_factory=lambda: {"test": Value(value=42), 0: Value(value=10)}
     )
 
@@ -533,7 +533,7 @@ class TestSyntax:
         @dataclass
         class Item:
             name: str
-            children: list[int]
+            children: List[int]
 
         items = [Item("a", [1, 2]), Item("b", [3, 4])]
         context = {"items": items}
@@ -619,7 +619,7 @@ class TestSyntax:
         @dataclass
         class Item:
             name: str
-            children: list[int]
+            children: List[int]
 
         items = [Item("a", [1]), Item("b", [2])]
         context = {"items": items, "x": 100, "y": 200}
@@ -644,7 +644,7 @@ class TestSyntax:
         @dataclass
         class Item:
             name: str
-            children: list[int]
+            children: List[int]
 
         items = [Item("a", [-1, 1]), Item("b", [-2, 2])]
         context = {"items": items, "x": 100, "y": 200}

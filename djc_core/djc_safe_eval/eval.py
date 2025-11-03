@@ -1,5 +1,5 @@
 import builtins
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from djc_core.djc_core import safe_eval as safe_eval_rust
 from djc_core.djc_safe_eval.error import error_context, _format_error_with_context
@@ -73,7 +73,7 @@ def safe_eval(
         def variable_fn(
             __context: Mapping[str, Any],
             __source: str,
-            __token: tuple[int, int],
+            __token: Tuple[int, int],
             var_name: str,
         ) -> Any:
             if not validate_variable(var_name):
@@ -88,7 +88,7 @@ def safe_eval(
         def attribute_fn(
             __context: Mapping[str, Any],
             __source: str,
-            __token: tuple[int, int],
+            __token: Tuple[int, int],
             obj: Any,
             attr_name: str,
         ) -> Any:
@@ -106,7 +106,7 @@ def safe_eval(
         def subscript_fn(
             __context: Mapping[str, Any],
             __source: str,
-            __token: tuple[int, int],
+            __token: Tuple[int, int],
             obj: Any,
             key: Any,
         ) -> Any:
@@ -122,7 +122,7 @@ def safe_eval(
         def call_fn(
             __context: Mapping[str, Any],
             __source: str,
-            __token: tuple[int, int],
+            __token: Tuple[int, int],
             func: Callable,
             *args: Any,
             **kwargs: Any,
@@ -139,7 +139,7 @@ def safe_eval(
         def assign_fn(
             __context: Mapping[str, Any],
             __source: str,
-            __token: tuple[int, int],
+            __token: Tuple[int, int],
             var_name: str,
             value: Any,
         ) -> Any:
@@ -242,7 +242,7 @@ def safe_eval(
 # Each interceptor function receives the same 3 first positional arguments:
 # - __context: Mapping[str, Any] - The evaluation context
 # - __source: str - The source code
-# - __token: tuple[int, int] - The token tuple (start_index, end_index)
+# - __token: Tuple[int, int] - The token tuple (start_index, end_index)
 #
 # The __source and __token arguments are used by `@error_context` decorator to add the position
 # where the error occurred to the error message.
@@ -256,7 +256,7 @@ def safe_eval(
 
 @error_context("variable")
 def variable(
-    __context: Mapping[str, Any], __source: str, __token: tuple[int, int], var_name: str
+    __context: Mapping[str, Any], __source: str, __token: Tuple[int, int], var_name: str
 ) -> Any:
     """Look up a variable in the evaluation context, e.g. `my_var`"""
     if not is_safe_variable(var_name):
@@ -268,7 +268,7 @@ def variable(
 def attribute(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     obj: Any,
     attr_name: str,
 ) -> Any:
@@ -284,7 +284,7 @@ def attribute(
 def subscript(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     obj: Any,
     key: Any,
 ) -> Any:
@@ -300,7 +300,7 @@ def subscript(
 def call(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     func: Callable,
     *args: Any,
     **kwargs: Any,
@@ -319,7 +319,7 @@ def call(
 def assign(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     var_name: str,
     value: Any,
 ) -> Any:
@@ -338,7 +338,7 @@ def assign(
 def slice(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     lower: Any = None,
     upper: Any = None,
     step: Any = None,
@@ -355,10 +355,10 @@ def slice(
 def interpolation(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     value: Any,
     expression: str,
-    conversion: str | None,
+    conversion: Optional[str],
     format_spec: str,
 ) -> Any:
     """Process t-string interpolation."""
@@ -371,7 +371,7 @@ def interpolation(
 
 @error_context("template")
 def template(
-    __context: Mapping[str, Any], __source: str, __token: tuple[int, int], *parts: Any
+    __context: Mapping[str, Any], __source: str, __token: Tuple[int, int], *parts: Any
 ) -> Any:
     """Construct a template from parts."""
     try:
@@ -385,7 +385,7 @@ def template(
 def format(
     __context: Mapping[str, Any],
     __source: str,
-    __token: tuple[int, int],
+    __token: Tuple[int, int],
     template_string: str,
     *args: Any,
 ) -> str:
