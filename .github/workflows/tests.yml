@@ -33,7 +33,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Rust tests
-        run: cargo test
+        shell: bash
+        run: |
+          # Get all workspace packages and filter out those starting with 'ruff'
+          packages=$(cargo metadata --format-version 1 --no-deps | \
+            jq -r '.workspace_members[]' | \
+            sed 's/.*\///' | \
+            grep -v '^ruff' | \
+            xargs)
+          # Build cargo test command with -p flags for each package
+          # Format as `cargo test -p <package> -p <package> ...`
+          echo "Running tests for packages: $packages"
+          cargo test $(echo "$packages" | sed 's/\([^ ]*\)/-p \1/g')
 
       # After Rust tests pass, run Python tests next
       - name: Set up Python ${{ matrix.python-version }}
