@@ -18,6 +18,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
 
       # First check Rust tests
       - name: Install Rust toolchain
