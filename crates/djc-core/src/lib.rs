@@ -2,7 +2,7 @@ use djc_html_transformer::{
     set_html_attributes as set_html_attributes_rust, HtmlTransformerConfig,
 };
 use djc_safe_eval::safe_eval as safe_eval_rust;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 

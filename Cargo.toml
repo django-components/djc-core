@@ -66,11 +66,13 @@ salsa = { git = "https://github.com/salsa-rs/salsa.git", rev = "29ab321b45d00daa
 ] }
 schemars = { version = "0.8.16" }
 serde = { version = "1.0.197", features = ["derive"] }
+thiserror = { version = "2.0.17" }
 
 # Used by ruff_cache
 filetime = { version = "0.2.23" }
 glob = { version = "0.3.1" }
 globset = { version = "0.4.14" }
+regex = { version = "1.12.2" }
 seahash = { version = "4.1.0" }
 
 # Used by ruff_macros
