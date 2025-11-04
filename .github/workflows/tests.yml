@@ -18,6 +18,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
 
       # First check Rust tests
       - name: Install Rust toolchain
@@ -30,7 +33,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Rust tests
-        run: cargo test
+        shell: bash
+        run: |
+          # Build cargo test command with -p flags for each package
+          # We do so because the ruff submodule also contains crates and those will
+          # run if we don't limit the tests to only our packages.
+          # And `cargo test` command doesn't allow to exclude crates based on patterns.
+          #
+          # 1. Get all directories in our `crates/` folder
+          packages=$(find crates -maxdepth 1 -mindepth 1 -type d | \
+            sed 's/crates\///' | \
+            tr '\n' ' ')
+          echo "Running tests for packages: $packages"
+          # 2. Format as `cargo test -p <package> -p <package> ...`
+          cargo test $(echo "$packages" | sed 's/\([^ ]*\)/-p \1/g')
 
       # After Rust tests pass, run Python tests next
       - name: Set up Python ${{ matrix.python-version }}

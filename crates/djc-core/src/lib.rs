@@ -1,7 +1,8 @@
 use djc_html_transformer::{
     set_html_attributes as set_html_attributes_rust, HtmlTransformerConfig,
 };
-use pyo3::exceptions::{PyValueError};
+use djc_safe_eval::safe_eval as safe_eval_rust;
+use pyo3::exceptions::{PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
@@ -10,6 +11,10 @@ use pyo3::types::{PyDict, PyTuple};
 fn djc_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // HTML transformer
     m.add_function(wrap_pyfunction!(set_html_attributes, m)?)?;
+
+    // Safe eval
+    m.add_function(wrap_pyfunction!(safe_eval, m)?)?;
+
     Ok(())
 }
 
@@ -73,4 +78,32 @@ pub fn set_html_attributes(
         }
         Err(e) => Err(PyValueError::new_err(e.to_string())),
     }
+}
+
+/// Transform a Python expression string to make it safe for evaluation.
+///
+/// This function takes a Python expression string and transforms it into safe code
+/// by wrapping potentially unsafe operations (like variable access, function calls,
+/// attribute access, etc.) with sandboxed function calls.
+///
+/// Args:
+///     source (str): The Python expression string to transform.
+///
+/// Returns:
+///     str: The transformed Python expression as a string.
+///
+/// Raises:
+///     SyntaxError: If the input is not valid Python syntax or contains forbidden constructs.
+///
+/// Example:
+///     >>> safe_eval("my_var + 1")
+///     'variable("my_var") + 1'
+///
+///     >>> safe_eval("lambda x: x + my_var")
+///     'lambda x: x + variable("my_var")'
+#[pyfunction]
+#[pyo3(signature = (source))]
+fn safe_eval(source: &str) -> PyResult<String> {
+    let result = safe_eval_rust(source).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    Ok(result)
 }

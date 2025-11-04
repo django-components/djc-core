@@ -1,0 +1,4 @@
+[submodule "crates/djc-safe-eval/submodules/ruff"]
+	path = crates/djc-safe-eval/submodules/ruff
+	url = https://github.com/astral-sh/ruff.git
+	# tag = 0.14.0

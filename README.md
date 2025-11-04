@@ -12,6 +12,74 @@ pip install djc-core
 
 ## Packages
 
+### Safe eval
+
+Re-implementation of Jinja2's sandboxed evaluation logic, built in Rust using the Ruff Python parser.
+
+**Usage**
+
+```python
+from djc_core import safe_eval
+
+# Compile an expression
+compiled = safe_eval("my_var + 1")
+
+# Evaluate with a context
+result = compiled({"my_var": 5})
+print(result)  # 6
+```
+
+**Key Features**
+
+- **Security**: Blocks unsafe operations like `eval()`, `exec()`, accessing private attributes (`_private`), and dangerous builtins
+- **Variable tracking**: Reports which variables are used and which are assigned via walrus operator (`:=`)
+- **Error reporting**: Provides detailed error messages with underlined source code indicating where errors occurred
+- **Performance**: Implemented in Rust for fast parsing and transformation
+
+**Supported Syntax**
+
+Almost all Python expression features are supported:
+
+- Literals, data structures, operators
+- Comprehensions, lambdas, conditionals
+- F-strings and t-strings
+- Function calls, attribute/subscript access
+- Walrus operator for assignments
+
+**Security**
+
+By default, `safe_eval` blocks:
+
+- Unsafe builtins (`eval`, `exec`, `open`, etc.)
+- Private attributes (starting with `_`)
+- Dunder attributes (`__class__`, `__dict__`, etc.)
+- Functions decorated with `@unsafe`
+- Django methods marked with `alters_data = True`
+
+For more details, examples, and advanced usage, see [`crates/djc-safe-eval/README.md`](crates/djc-safe-eval/README.md).
+
+> **WARNING!** Just like Jinja2 and Django's templating, none of these are 100% bulletproof solutions!
+>
+> Because they work by blocking known unsafe scenarios. There can always be a new unknown scenario.
+>
+> If you expose a dangerous function to the template/expression, this can be potentially exploited.
+>
+> Safer approach would be to allow to call only those functions that have been explicitly tagged as safe.
+>
+> If you really need to render templates submitted from your users you should instead define the UI blocks yourself, and let your users pick and choose through JSON or similar:
+>
+> ```json
+> {
+>   "template": "my_template",
+>   "user_id": 123,
+>   "blocks": [
+>     {"type": "header", "title": "Hello!"},
+>     {"type": "paragraph", "text": "This is my blog"},
+>     {"type": "table", "data": [[1, 2, 3], [3, 4, 5]]},
+>   ]
+> }
+> ```
+
 ### HTML transfomer
 
 Transform HTML in a single pass. This is a simple implementation.
