@@ -37,15 +37,27 @@
 //! - `[x for x in items]` → `[x for x in variable(context, source, token, "items")]`
 //! - The variable `x` is NOT transformed because it's local to the comprehension
 //!
-//! However, walrus operator assignments in comprehensions DO leak out (matching Python behavior):
-//! - `[y for x in items if (y := x + 1)]` - the variable `y` is accessible after the comprehension
+//! Walrus assignments in comprehensions ARE transformed and DO leak out (matching Python behavior):
+//! - `[y for x in items if (y := x + 1)]` → `[assign(context, source, token, "y", x + 1) for x in variable(context, source, token, "items")]`
+//! - the variable `y` is accessible after the comprehension
+//!
+//! If you define walrus variable with the same name as comprehension variables,
+//! you will get a `SyntaxError`:
+//! - `[(n := n + 1) + n for n in items]` - SyntaxError: cannot rebind comprehension iteration variable 'n'
 //!
 //! ### Lambda Functions
 //! Lambda parameters are local to the lambda and NOT transformed:
 //! - `lambda x: x + 1` - the parameter `x` is NOT transformed
 //!
-//! Unlike comprehensions, walrus assignments in lambdas do NOT leak out (matching Python behavior):
-//! - `(lambda: (x := 3))()` - the variable `x` is NOT accessible after the lambda executes
+//! **Walrus assignments in lambdas ARE transformed and DO leak out to the context** (diverges from Python):
+//! - `(lambda: (x := 3))()` - the variable `x` IS accessible after the lambda executes
+//! - This is diffrent to normal Python code, but it's intentional, so that
+//!   we can assign a variable to the context from within a callback function,
+//!   e.g.: `fn_with_callback(on_done=lambda res: (data := res))`
+//!
+//! If you define walrus variable with the same name as one of the lambda parameters,
+//! you will get a `SyntaxError`:
+//! - `(lambda x: (x := 3) and x**2)` - SyntaxError: cannot rebind lambda parameter 'x'
 //!
 //! ## Allowed Python features
 //!
@@ -80,8 +92,9 @@
 //!
 //! ### Assigned Variables
 //! Variables assigned via the walrus operator (`:=`) that become available outside their scope.
-//! These are only tracked if they propagate up (e.g., from comprehensions, but not from lambdas).
+//! These are tracked from both comprehensions and lambdas (unlike Python, where lambdas don't leak).
 //! Example: In `[y for x in items if (y := x + 1)]`, the variable `y` is assigned and available after the comprehension.
+//! Example: In `(lambda: (data := res))()`, the variable `data` is assigned and available after the lambda executes.
 //!
 //! Both types are returned as `Token` instances with position information (byte offsets and line/column numbers).
 //!
@@ -90,6 +103,7 @@
 //! The transformer returns `Result<TransformResult, String>` where errors include:
 //! - Parse errors from invalid Python syntax
 //! - Validation errors when forbidden AST nodes are encountered
+//! - SyntaxError when walrus assignments conflict with comprehension iteration variables or lambda parameters
 //!
 
 // Python AST types
@@ -363,11 +377,12 @@ pub fn transform_expression_string(source: &str) -> Result<TransformResult, Stri
 /// Our custom AST transformer that validates and transforms Python expressions
 /// to make them safe for evaluation in a sandboxed environment.
 pub struct SandboxTransformer {
-    // Track locally introduced variables (from comprehensions, lambdas, etc.)
-    // that should NOT be transformed to `variable("name", context)` calls
-    // Using RefCell so we can modify it during traversal (e.g., when we encounter
-    // walrus assignments in lambdas)
-    local_variables: RefCell<HashSet<String>>,
+    // Track variables introduced by comprehensions that should NOT be transformed to `variable("name", context)` calls
+    // Using RefCell so we can modify it during traversal
+    comprehension_variables: RefCell<HashSet<String>>,
+    // Track variables introduced by lambda parameters that should NOT be transformed to `variable("name", context)` calls
+    // Using RefCell so we can modify it during traversal
+    lambda_variables: RefCell<HashSet<String>>,
     // Track validation errors instead of panicking
     // NOTE: Inside transformer methods (visit_xxx) we have only read access to SandboxTransformer
     // hence why we use RefCell to borrow the value from the outside.
@@ -392,44 +407,42 @@ pub struct SandboxTransformer {
     // We use a Vec to store all occurrences with their positions.
     // Each tuple is (variable_name, start_index, end_index).
     used_variables: RefCell<Vec<(String, usize, usize)>>,
-    // Whether we're currently inside a lambda expression.
-    // In lambdas, walrus assignments should NOT be transformed to assign() calls
-    // and should NOT leak to the outer context. Instead, they should be kept as
-    // regular Python walrus operators and added to local_variables.
-    is_in_lambda: bool,
 }
 
 impl SandboxTransformer {
     pub fn new() -> Self {
         Self {
-            local_variables: RefCell::new(HashSet::new()),
+            comprehension_variables: RefCell::new(HashSet::new()),
+            lambda_variables: RefCell::new(HashSet::new()),
             validation_error: RefCell::new(None),
             assignments: RefCell::new(Vec::new()),
             used_variables: RefCell::new(Vec::new()),
-            is_in_lambda: false,
         }
     }
 
-    /// Create a new SandboxTransformer with additional local variables (union)
+    /// Create a new SandboxTransformer with additional local variables
     /// We have to create a new copy because inside visit_xxx methods we have only read access.
     ///
     /// The child transformer:
-    /// - Inherits parent's local_variables + additional_locals
+    /// - Inherits parent's comprehension_variables + additional_comprehension_vars
+    /// - Inherits parent's lambda_variables + additional_lambda_vars
     /// - Starts with empty assignments (to track only new assignments made in child scope)
-    /// Note: Assignments are NOT added to local_variables because we still want to transform
-    /// references to assigned variables (they are set via assign() in the context, not in Python scope)
-    fn with_locals(&self, additional_locals: HashSet<String>, propagate_assignments: bool) -> Self {
-        let mut new_locals = self.local_variables.borrow().clone();
-        new_locals.extend(additional_locals);
+    fn with_locals(
+        &self,
+        additional_comprehension_vars: HashSet<String>,
+        additional_lambda_vars: HashSet<String>,
+    ) -> Self {
+        let mut new_comp_vars = self.comprehension_variables.borrow().clone();
+        new_comp_vars.extend(additional_comprehension_vars);
+        let mut new_lambda_vars = self.lambda_variables.borrow().clone();
+        new_lambda_vars.extend(additional_lambda_vars);
 
         Self {
-            local_variables: RefCell::new(new_locals),
+            comprehension_variables: RefCell::new(new_comp_vars),
+            lambda_variables: RefCell::new(new_lambda_vars),
             validation_error: RefCell::new(self.validation_error.borrow().clone()),
             assignments: RefCell::new(Vec::new()),
             used_variables: RefCell::new(Vec::new()),
-            // If parent is already in a lambda, child is also in a lambda (for nested lambdas)
-            // Otherwise, set based on propagate_assignments (false means we're in a lambda)
-            is_in_lambda: self.is_in_lambda || !propagate_assignments,
         }
     }
 
@@ -483,14 +496,12 @@ impl SandboxTransformer {
     }
 
     /// Propagate assignments and errors from a child transformer back to this one
-    fn propagate_from_child(&self, child: &SandboxTransformer, propagate_assignments: bool) {
-        // Propagate assignments up (so walrus variables remain accessible after leaving the scope)
-        // Only propagate if requested (comprehensions propagate, but lambdas don't)
-        if propagate_assignments {
-            self.assignments
-                .borrow_mut()
-                .extend(child.get_assignments());
-        }
+    fn propagate_from_child(&self, child: &SandboxTransformer) {
+        // Always propagate assignments up (so walrus variables remain accessible after leaving the scope)
+        // Now that we always transform walrus to assign(), assignments always propagate
+        self.assignments
+            .borrow_mut()
+            .extend(child.get_assignments());
 
         // Always propagate used_variables up (variables needed from context)
         self.used_variables
@@ -503,48 +514,39 @@ impl SandboxTransformer {
         }
     }
 
-    /// Check if a variable name is local
+    /// Check if a variable name is local (comprehension or lambda variable)
     fn is_local_variable(&self, name: &str) -> bool {
         // NOTE: Previously this contained also walrus assignments `(x := 2)`.
         // because the variable should be available after assignment, e.g. `(x := 2) and x > 1`.
         // HOWEVER, we actually replace the walrus operator with call to `assign(...)`,
         // and thus the variable is not assigned in THIS scope.
         // So we still need to replace later references with `variable("name", context)` calls.
-        self.local_variables.borrow().contains(name)
+        self.comprehension_variables.borrow().contains(name)
+            || self.lambda_variables.borrow().contains(name)
     }
 
     /// Visit an expression with additional local variables
     fn visit_expr_with_locals(
         &self,
         expr: &mut Expr,
-        new_local_vars: HashSet<String>,
-        propagate_assignments: bool,
+        new_comprehension_vars: HashSet<String>,
+        new_lambda_vars: HashSet<String>,
     ) {
-        let child_transformer = self.with_locals(new_local_vars, propagate_assignments);
+        let child_transformer = self.with_locals(new_comprehension_vars, new_lambda_vars);
         child_transformer.visit_expr(expr);
-        self.propagate_from_child(&child_transformer, propagate_assignments);
+        self.propagate_from_child(&child_transformer);
     }
 
     /// Visit a comprehension with additional local variables from the generator targets
-    /// Returns the walrus-assigned variables that were added to local_variables (for lambdas)
     fn visit_comprehension_with_locals(
         &self,
         comprehension: &mut ast::Comprehension,
-        new_local_vars: HashSet<String>,
-    ) -> HashSet<String> {
-        let child_transformer = self.with_locals(new_local_vars.clone(), true);
+        new_comprehension_vars: HashSet<String>,
+    ) {
+        let child_transformer = self.with_locals(new_comprehension_vars, HashSet::new());
         child_transformer.visit_comprehension(comprehension);
         // Comprehensions propagate walrus assignments (they leak out in Python)
-        self.propagate_from_child(&child_transformer, true);
-
-        // Return walrus-assigned variables that were added to local_variables
-        // These are variables that are in the child's local_variables but not in the original new_local_vars
-        let child_local_vars = child_transformer.local_variables.borrow().clone();
-        let walrus_assigned: HashSet<String> = child_local_vars
-            .difference(&new_local_vars)
-            .cloned()
-            .collect();
-        walrus_assigned
+        self.propagate_from_child(&child_transformer);
     }
 
     /// Extract variable names from a target expression (for comprehensions)
@@ -574,10 +576,9 @@ impl SandboxTransformer {
     /// Helper function to handle comprehension logic common to ListComp, SetComp, DictComp, and Generator
     /// This function:
     /// 1. Checks for async generators
-    /// 2. Extracts local variables from generator targets
-    /// 3. Visits generators and collects walrus-assigned variables
-    /// 4. Adds walrus-assigned variables to local_vars and lambda's local_variables if needed
-    /// 5. Calls the provided closure to transform the element(s)
+    /// 2. Extracts comprehension variables from generator targets
+    /// 3. Visits generators
+    /// 4. Calls the provided closure to transform the element(s)
     fn handle_comprehension<F>(&self, generators: &mut [ast::Comprehension], transform_elements: F)
     where
         F: FnOnce(&Self, HashSet<String>),
@@ -593,39 +594,23 @@ impl SandboxTransformer {
             }
         }
 
-        // Extract all locally introduced variables from all generators
-        let mut local_vars = HashSet::new();
+        // Extract all comprehension variables from all generators
+        let mut comprehension_vars = HashSet::new();
         for generator in generators.iter() {
-            local_vars.extend(Self::extract_target_variables(&generator.target));
+            comprehension_vars.extend(Self::extract_target_variables(&generator.target));
         }
 
         // IMPORTANT: Visit generators FIRST (including if conditions where walrus might occur)
         // This way, any walrus assignments in the if conditions will be tracked and propagated
         // before we visit the element
-        // Collect walrus-assigned variables from all generators
-        // These need to be added to local_vars before visiting the element
-        let mut walrus_assigned_vars = HashSet::new();
         for generator in generators.iter_mut() {
-            let walrus_vars = self.visit_comprehension_with_locals(generator, local_vars.clone());
-            walrus_assigned_vars.extend(walrus_vars);
+            self.visit_comprehension_with_locals(generator, comprehension_vars.clone());
         }
 
-        // Add walrus-assigned variables to local_vars so they're available in the element
-        local_vars.extend(walrus_assigned_vars.clone());
-
-        // If we're in a lambda, also add walrus-assigned variables to the lambda's local_variables
-        // so they're available in the rest of the lambda body (e.g., after the comprehension)
-        if self.is_in_lambda {
-            for var in &walrus_assigned_vars {
-                self.local_variables.borrow_mut().insert(var.clone());
-            }
-        }
-
-        // Transform the element(s) with local variables
+        // Transform the element(s) with comprehension variables
         // This includes the variables introduced by generators (like 'x' in [x+1 for x in items])
-        // and walrus-assigned variables (like 'y' in [y for x in items if (y := x * 2)])
-        // Comprehensions propagate walrus assignments
-        transform_elements(self, local_vars);
+        // Comprehensions propagate walrus assignments (they leak out in Python)
+        transform_elements(self, comprehension_vars);
     }
 }
 
@@ -705,36 +690,52 @@ impl Transformer for SandboxTransformer {
 
             // ✅ ALLOWED - Comprehensions (but check for async)
             Expr::ListComp(list_comp) => {
-                self.handle_comprehension(&mut list_comp.generators, |transformer, local_vars| {
-                    // Transform element with local variables
+                self.handle_comprehension(&mut list_comp.generators, |transformer, comp_vars| {
+                    // Transform element with comprehension variables
                     // Comprehensions propagate walrus assignments
-                    transformer.visit_expr_with_locals(&mut list_comp.elt, local_vars, true)
+                    transformer.visit_expr_with_locals(
+                        &mut list_comp.elt,
+                        comp_vars,
+                        HashSet::new(),
+                    )
                 });
             }
             Expr::SetComp(set_comp) => {
-                self.handle_comprehension(&mut set_comp.generators, |transformer, local_vars| {
-                    // Transform element with local variables
+                self.handle_comprehension(&mut set_comp.generators, |transformer, comp_vars| {
+                    // Transform element with comprehension variables
                     // Comprehensions propagate walrus assignments
-                    transformer.visit_expr_with_locals(&mut set_comp.elt, local_vars, true);
+                    transformer.visit_expr_with_locals(
+                        &mut set_comp.elt,
+                        comp_vars,
+                        HashSet::new(),
+                    );
                 });
             }
             Expr::DictComp(dict_comp) => {
-                self.handle_comprehension(&mut dict_comp.generators, |transformer, local_vars| {
-                    // Transform key and value with local variables
+                self.handle_comprehension(&mut dict_comp.generators, |transformer, comp_vars| {
+                    // Transform key and value with comprehension variables
                     // Comprehensions propagate walrus assignments
                     transformer.visit_expr_with_locals(
                         &mut dict_comp.key,
-                        local_vars.clone(),
-                        true,
+                        comp_vars.clone(),
+                        HashSet::new(),
                     );
-                    transformer.visit_expr_with_locals(&mut dict_comp.value, local_vars, true);
+                    transformer.visit_expr_with_locals(
+                        &mut dict_comp.value,
+                        comp_vars,
+                        HashSet::new(),
+                    );
                 });
             }
             Expr::Generator(generator) => {
-                self.handle_comprehension(&mut generator.generators, |transformer, local_vars| {
-                    // Transform element with local variables
+                self.handle_comprehension(&mut generator.generators, |transformer, comp_vars| {
+                    // Transform element with comprehension variables
                     // Comprehensions propagate walrus assignments
-                    transformer.visit_expr_with_locals(&mut generator.elt, local_vars, true);
+                    transformer.visit_expr_with_locals(
+                        &mut generator.elt,
+                        comp_vars,
+                        HashSet::new(),
+                    );
                 });
             }
 
@@ -899,7 +900,9 @@ impl Transformer for SandboxTransformer {
             }
 
             // ⚠️ Walrus operator transform from `x := y` to `assign(context, source, token, "x", y)`
-            // BUT: Inside lambdas, we keep it as a Python walrus operator and add the variable to local_variables
+            // We always transform to assign() even in lambdas, so assignments leak out to the context
+            // This allows patterns like: fn_with_callback(on_done=lambda res: (data:= res))
+            // However, we raise SyntaxError if the assignment conflicts with comprehension or lambda variables
             Expr::Named(named) => {
                 // First, recursively transform the value expression
                 self.visit_expr(&mut named.value);
@@ -918,39 +921,47 @@ impl Transformer for SandboxTransformer {
 
                 let range = named.range;
 
-                if self.is_in_lambda {
-                    // Inside a lambda: keep the walrus operator as-is (don't transform to assign())
-                    // and add the variable to local_variables so subsequent references don't get transformed
-                    // to variable() calls. This way the variable stays local to the lambda and doesn't
-                    // leak to the outer context.
-                    self.local_variables.borrow_mut().insert(var_name.clone());
-                    // Keep the walrus operator as-is - don't transform it to assign()
-                    // The expression remains: (var_name := value)
-                } else {
-                    // Not in a lambda: transform to assign() call and record assignment
-                    // Extract position from the target (variable name), not the entire named expression
-                    let target_range = match &*named.target {
-                        Expr::Name(name) => name.range,
-                        _ => range, // Fallback to entire expression if target is not a simple name
-                    };
-                    let start_index = target_range.start().to_usize();
-                    let end_index = target_range.end().to_usize();
-                    self.add_assignment(var_name.clone(), start_index, end_index);
-
-                    // Create a StringLiteral for the variable name
-                    let var_name_literal = string_literal(&var_name, range);
-
-                    // `assign(context, source, (start_index, end_index), "var_name", value)`
-                    let wrapper_call = interceptor_call(
-                        "assign",
-                        vec![var_name_literal, *named.value.clone()],
-                        vec![],
-                        range,
-                    );
-
-                    // Replace the current expression with the wrapper call
-                    *expr = wrapper_call;
+                // Check for conflicts with comprehension variables
+                if self.comprehension_variables.borrow().contains(&var_name) {
+                    self.set_error(format!(
+                        "SyntaxError: assignment expression cannot rebind comprehension iteration variable '{}'",
+                        var_name
+                    ));
+                    return;
                 }
+
+                // Check for conflicts with lambda variables
+                if self.lambda_variables.borrow().contains(&var_name) {
+                    self.set_error(format!(
+                        "SyntaxError: assignment expression cannot rebind lambda parameter '{}'",
+                        var_name
+                    ));
+                    return;
+                }
+
+                // Transform to assign() call and record assignment
+                // Extract position from the target (variable name), not the entire named expression
+                let target_range = match &*named.target {
+                    Expr::Name(name) => name.range,
+                    _ => range, // Fallback to entire expression if target is not a simple name
+                };
+                let start_index = target_range.start().to_usize();
+                let end_index = target_range.end().to_usize();
+                self.add_assignment(var_name.clone(), start_index, end_index);
+
+                // Create a StringLiteral for the variable name
+                let var_name_literal = string_literal(&var_name, range);
+
+                // `assign(context, source, (start_index, end_index), "var_name", value)`
+                let wrapper_call = interceptor_call(
+                    "assign",
+                    vec![var_name_literal, *named.value.clone()],
+                    vec![],
+                    range,
+                );
+
+                // Replace the current expression with the wrapper call
+                *expr = wrapper_call;
             }
 
             // ⚠️ F-string transform from `f"Hello {price!r:.2f}"` to `format(context, source, token, "Hello {}", (variable(context, source, token, "price"), "r", ".2f"))`
@@ -998,64 +1009,65 @@ impl Transformer for SandboxTransformer {
                                     // - dynamic expression (`{width}.{precision}f`)
                                     // We don't call built-in `format()` here; we pass the format spec as metadata
                                     // and let our `format()` interceptor handle it.
-                                    let format_spec_expr =
-                                        if let Some(format_spec) = &mut interpolation.format_spec {
-                                            // Build the format spec - can be static or dynamic
-                                            let mut spec_template_parts = Vec::new();
-                                            let mut spec_format_args = Vec::new();
+                                    let format_spec_expr = if let Some(format_spec) =
+                                        &mut interpolation.format_spec
+                                    {
+                                        // Build the format spec - can be static or dynamic
+                                        let mut spec_template_parts = Vec::new();
+                                        let mut spec_format_args = Vec::new();
 
-                                            for spec_element in format_spec.elements.iter_mut() {
-                                                match spec_element {
-                                                    ast::InterpolatedStringElement::Literal(lit) => {
-                                                        spec_template_parts.push(lit.value.to_string());
-                                                    }
-                                                    ast::InterpolatedStringElement::Interpolation(
-                                                        spec_interp,
-                                                    ) => {
-                                                        // Format specs with expressions!
-                                                        // e.g., f"{value:{width}.{precision}f}"
-                                                        // Transform the expression in the format spec
-                                                        self.visit_expr(&mut spec_interp.expression);
+                                        for spec_element in format_spec.elements.iter_mut() {
+                                            match spec_element {
+                                                ast::InterpolatedStringElement::Literal(lit) => {
+                                                    spec_template_parts.push(lit.value.to_string());
+                                                }
+                                                ast::InterpolatedStringElement::Interpolation(
+                                                    spec_interp,
+                                                ) => {
+                                                    // Format specs with expressions!
+                                                    // e.g., f"{value:{width}.{precision}f}"
+                                                    // Transform the expression in the format spec
+                                                    self.visit_expr(&mut spec_interp.expression);
 
-                                                        // Add {} placeholder
-                                                        spec_template_parts.push("{}".to_string());
+                                                    // Add {} placeholder
+                                                    spec_template_parts.push("{}".to_string());
 
-                                                        // Add the transformed expression to spec args
-                                                        spec_format_args
-                                                            .push(*spec_interp.expression.clone());
-                                                    }
+                                                    // Add the transformed expression to spec args
+                                                    spec_format_args
+                                                        .push(*spec_interp.expression.clone());
                                                 }
                                             }
+                                        }
 
-                                            let spec_template_str = spec_template_parts.join("");
+                                        let spec_template_str = spec_template_parts.join("");
 
-                                            // Build the format spec expression
-                                            if spec_format_args.is_empty() {
-                                                // Static format spec - just use a string literal
-                                                string_literal(&spec_template_str, expr_range)
-                                            } else {
-                                                // Dynamic format spec - we need to pass both template and args
-                                                // We'll pass this as a tuple: (template, *args)
-                                                let spec_template_literal =
-                                                    string_literal(&spec_template_str, expr_range);
-                                                // Create a tuple: (template, arg1, arg2, ...)
-                                                Expr::Tuple(ast::ExprTuple {
-                                                    node_index: Default::default(),
-                                                    range: expr_range,
-                                                    ctx: ast::ExprContext::Load,
-                                                    parenthesized: false,
-                                                    elts: {
-                                                        let mut tuple_elts =
-                                                            vec![spec_template_literal];
-                                                        tuple_elts.extend(spec_format_args);
-                                                        tuple_elts.into()
-                                                    },
-                                                })
-                                            }
+                                        // Build the format spec expression
+                                        if spec_format_args.is_empty() {
+                                            // Static format spec - just use a string literal
+                                            string_literal(&spec_template_str, expr_range)
                                         } else {
-                                            // No format spec - use empty string
-                                            string_literal("", expr_range)
-                                        };
+                                            // Dynamic format spec - we need to pass both template and args
+                                            // We'll pass this as a tuple: (template, *args)
+                                            let spec_template_literal =
+                                                string_literal(&spec_template_str, expr_range);
+                                            // Create a tuple: (template, arg1, arg2, ...)
+                                            Expr::Tuple(ast::ExprTuple {
+                                                node_index: Default::default(),
+                                                range: expr_range,
+                                                ctx: ast::ExprContext::Load,
+                                                parenthesized: false,
+                                                elts: {
+                                                    let mut tuple_elts =
+                                                        vec![spec_template_literal];
+                                                    tuple_elts.extend(spec_format_args);
+                                                    tuple_elts.into()
+                                                },
+                                            })
+                                        }
+                                    } else {
+                                        // No format spec - use empty string
+                                        string_literal("", expr_range)
+                                    };
 
                                     // Add simple placeholder to template
                                     template_parts.push("{}".to_string());
@@ -1252,30 +1264,32 @@ impl Transformer for SandboxTransformer {
                     }
                 }
 
-                // Now extract lambda parameter names into local variables
-                let mut local_vars = HashSet::new();
+                // Now extract lambda parameter names into lambda variables
+                let mut lambda_vars = HashSet::new();
                 if let Some(parameters) = &lambda.parameters {
                     for param in &parameters.posonlyargs {
-                        local_vars.insert(param.name().to_string());
+                        lambda_vars.insert(param.name().to_string());
                     }
                     for param in &parameters.args {
-                        local_vars.insert(param.name().to_string());
+                        lambda_vars.insert(param.name().to_string());
                     }
                     for param in &parameters.kwonlyargs {
-                        local_vars.insert(param.name().to_string());
+                        lambda_vars.insert(param.name().to_string());
                     }
                     if let Some(vararg) = &parameters.vararg {
-                        local_vars.insert(vararg.name().to_string());
+                        lambda_vars.insert(vararg.name().to_string());
                     }
                     if let Some(kwarg) = &parameters.kwarg {
-                        local_vars.insert(kwarg.name().to_string());
+                        lambda_vars.insert(kwarg.name().to_string());
                     }
                 }
 
-                // Transform the lambda body with the parameter names as local variables
+                // Transform the lambda body with the parameter names as lambda variables
                 // This ensures lambda parameters are not transformed to variable("param", context) calls
-                // Lambdas do NOT propagate walrus assignments (they don't leak out in Python)
-                self.visit_expr_with_locals(&mut lambda.body, local_vars, false);
+                // Walrus assignments inside lambdas are transformed to assign() and leak out to context
+                // This allows patterns like: fn_with_callback(on_done=lambda res: (data:= res))
+                // However, walrus assignments cannot rebind lambda parameters (SyntaxError)
+                self.visit_expr_with_locals(&mut lambda.body, HashSet::new(), lambda_vars);
             }
 
             _ => {

@@ -20,9 +20,7 @@ It works by:
      Here we implement similar safety measures as Jinja.
 6. User receives back a function to evaluate the compiled code.
 
-
-5. **Runtime**: The generated code is evaluated with sandboxed interceptors that enforce security policies
-
+7. **Runtime**: The generated code is evaluated with sandboxed interceptors that enforce security policies
 
 This package is split in 2 parts:
 
@@ -91,6 +89,33 @@ context = {"x": 4}
 result = compiled(context)
 print(result)  # 8
 print(context)  # {"x": 4, "y": 8}
+```
+
+Walrus operator can be used also inside comprehensions or lambdas:
+
+```py
+# Comprehension
+compiled = safe_eval("[(x := y) for y in [1, 2, 3]]")
+context = {}
+result = compiled(context)
+print(context)  # {"x": 3}
+
+# Lambda
+compiled = safe_eval("fn_with_callback(on_done=lambda res: (data := res))")
+context = {"fn_with_callback": fn_with_callback}
+result = compiled(context)
+print(context)  # {"data": {...}, "fn_with_callback": fn_with_callback},  }
+```
+
+> **NOTE: This differs from regular Python, where walrus operator inside a function
+> will NOT leak out.**
+
+If you try to assign a variable to the same value as an existing comprehension or
+lambda arguments, you will get a SyntaxError:
+
+```py
+safe_eval("[(y := y) for y in [1, 2, 3]]")  # SyntaxError
+safe_eval("lambda x: (x := 123))")  # SyntaxError
 ```
 
 ### Unsafe operations
@@ -259,13 +284,11 @@ Almost anything that is a valid Python expression is allowed:
 
 ### Variable scoping
 
-The transformer correctly handles Python's scoping rules:
+The transformer matches Python's scoping rules for comprehensions and lambdas, but diverges for walrus assignments:
 
 - **Comprehensions**: Variables introduced in comprehensions are local to the comprehension (e.g., `x` in `[x for x in items]`)
 - **Lambda parameters**: Lambda parameters are local to the lambda and not transformed
-- **Walrus operator**:
-  - In comprehensions: Walrus assignments remain available OUTSIDE of comprehensions
-  - In lambdas: Walrus assignments are NOT available outside
+- **Walrus operator**: Walrus assignments remain available outside of comprehensions or lambdas.(diverges from Python)
 
 ## Performance
 
@@ -348,6 +371,7 @@ The version of `ruff` is locked to a specific commit or tag, documented in `.git
    ```
 
 4. Navigate back and commit the change:
+
    ```bash
    cd ../../..
    git add .gitmodules crates/djc-safe-eval/submodules/ruff

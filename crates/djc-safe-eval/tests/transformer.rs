@@ -56,9 +56,25 @@ mod tests {
 
     fn _test_forbidden_syntax(input: &str) {
         let result = transform_expression_string(input);
-        assert!(result.is_err());
+        if result.is_ok() {
+            // If transformation succeeded, print the result to help debug
+            let transform_result = result.unwrap();
+            let generated = generate_python_code(&transform_result.expression);
+            panic!(
+                "Expected transformation to fail, but it succeeded.\nInput: {}\nGenerated code: {}",
+                input, generated
+            );
+        }
         let error = result.unwrap_err();
-        assert!(error.contains("Parse error") || error.contains("Unexpected token"));
+        if !error.contains("Parse error")
+            && !error.contains("Unexpected token")
+            && !error.contains("SyntaxError")
+        {
+            panic!(
+                "Expected error to contain 'Parse error', 'Unexpected token', or 'SyntaxError', but got:\nInput: {}\nError: {}",
+                input, error
+            );
+        }
     }
 
     #[test]
@@ -1246,6 +1262,149 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_transform_walrus_overwriting_loop_argument_syntax_error() {
+        // Attempting to rebind comprehension iteration variable should raise SyntaxError
+        // [(n := n + 1) + n for n in [1, 2, 3]]  # raises SyntaxError: assignment expression cannot rebind comprehension iteration variable 'n'
+        _test_forbidden_syntax("[(n := n + 1) + n for n in items]");
+    }
+
+    #[test]
+    fn test_tranform_walrus_overwriting_function_argument_allowed() {
+        // Overwriting function argument IS allowed in Python.
+        // (lambda x: (x := 3) and x**2)(0)  # returns 9
+        // However, for consistency with comprehensions, we disallow it here.
+        _test_forbidden_syntax("(lambda x: (x := 3) and x**2)");
+    }
+
+    #[test]
+    fn test_transform_walrus_in_lambda_leaks() {
+        // In Python, the walrus assignment inside lambda is scoped to that function,
+        // and will NOT be available to outer scope.
+        // However, we allow that so that in templates one can assign variables to the context
+        // even from inside callbacks, e.g.
+        // `fn_with_callback(on_done=lambda res: (data := res)) }}`
+        _test_transformation(
+            "(lambda: (y := 42) and y)",
+            r#"lambda: assign(context, source, (10, 17), 'y', 42) and variable(context, source, (23, 24), 'y')"#,
+            vec![("y", 23, 24, (1, 24))],
+            vec![("y", 10, 11, (1, 11))],
+        );
+    }
+
+    #[test]
+    fn test_transform_walrus_in_lambda_in_comprehension() {
+        // In Python, the walrus assignment inside lambda is scoped to that function,
+        // and will NOT be available to outer scope.
+        // However, we allow that so that in templates one can assign variables to the context
+        // even from inside callbacks, e.g.
+        // `fn_with_callback(on_done=lambda res: (data := res)) }}`
+        _test_transformation(
+            "[lambda: (temp := item * 2) for item in items] and temp + item",
+            r#"[lambda: assign(context, source, (10, 26), 'temp', item * 2) for item in variable(context, source, (40, 45), 'items')] and variable(context, source, (51, 55), 'temp') + variable(context, source, (58, 62), 'item')"#,
+            vec![
+                ("items", 40, 45, (1, 41)),
+                ("temp", 51, 55, (1, 52)),
+                ("item", 58, 62, (1, 59)),
+            ],
+            vec![("temp", 10, 14, (1, 11))],
+        );
+    }
+
+    #[test]
+    fn test_transform_walrus_in_comprehension_condition_in_lambda() {
+        // In Python, the walrus assignment inside lambda is scoped to that function,
+        // and will NOT be available to outer scope.
+        // However, we allow that so that in templates one can assign variables to the context
+        // even from inside callbacks, e.g.
+        // `fn_with_callback(on_done=lambda res: (data := res)) }}`
+        // Note that the `+ [y]` at the end is STILL part of lambda and should NOT be transformed.
+        _test_transformation(
+            "lambda: [y for x in items if (y := x * 2)] + [y]",
+            r#"lambda: [variable(context, source, (9, 10), 'y') for x in variable(context, source, (20, 25), 'items') if assign(context, source, (30, 40), 'y', x * 2)] + [variable(context, source, (46, 47), 'y')]"#,
+            vec![
+                ("y", 9, 10, (1, 10)),
+                ("items", 20, 25, (1, 21)),
+                ("y", 46, 47, (1, 47)),
+            ],
+            vec![("y", 30, 31, (1, 31))],
+        );
+    }
+
+    #[test]
+    fn test_transform_walrus_in_comprehension_condition_in_lambda_2() {
+        // In Python, the walrus assignment inside lambda is scoped to that function,
+        // and will NOT be available to outer scope.
+        // However, we allow that so that in templates one can assign variables to the context
+        // even from inside callbacks, e.g.
+        // `fn_with_callback(on_done=lambda res: (data := res)) }}`
+        // Note that the `+ [y]` at the end is STILL part of lambda and should NOT be transformed.
+        _test_transformation(
+            "(lambda: [y for x in items if (y := x * 2)] + [y])",
+            r#"lambda: [variable(context, source, (10, 11), 'y') for x in variable(context, source, (21, 26), 'items') if assign(context, source, (31, 41), 'y', x * 2)] + [variable(context, source, (47, 48), 'y')]"#,
+            vec![
+                ("y", 10, 11, (1, 11)),
+                ("items", 21, 26, (1, 22)),
+                ("y", 47, 48, (1, 48)),
+            ],
+            vec![("y", 31, 32, (1, 32))],
+        );
+    }
+
+    #[test]
+    fn test_transform_walrus_in_comprehension_condition_in_lambda_3() {
+        // In Python, the walrus assignment inside lambda is scoped to that function,
+        // and will NOT be available to outer scope.
+        // However, we allow that so that in templates one can assign variables to the context
+        // even from inside callbacks, e.g.
+        // `fn_with_callback(on_done=lambda res: (data := res)) }}`
+        _test_transformation(
+            "(lambda: [y for x in items if (y := x * 2)]) + y",
+            r#"(lambda: [variable(context, source, (10, 11), 'y') for x in variable(context, source, (21, 26), 'items') if assign(context, source, (31, 41), 'y', x * 2)]) + variable(context, source, (47, 48), 'y')"#,
+            vec![
+                ("y", 10, 11, (1, 11)),
+                ("items", 21, 26, (1, 22)),
+                ("y", 47, 48, (1, 48)),
+            ],
+            vec![("y", 31, 32, (1, 32))],
+        );
+    }
+
+    #[test]
+    fn test_walrus_conflict_with_comprehension_variable() {
+        // [(n := n + 1) + n for n in [1, 2, 3]]
+        // Raises `SyntaxError: assignment expression cannot rebind comprehension iteration variable 'n'`
+        _test_forbidden_syntax("[(n := n + 1) + n for n in items]");
+    }
+
+    #[test]
+    fn test_walrus_conflict_with_nested_comprehension_variable() {
+        // Test that even outer comprehension variables cannot be rebound
+        // [[(x := x + 1) for y in inner] for x in outer]  # should raise SyntaxError
+        _test_forbidden_syntax("[[(x := x + 1) for y in inner] for x in outer]");
+    }
+
+    #[test]
+    fn test_walrus_conflict_with_lambda_parameter() {
+        // (lambda x: (x := 3) and x**2)(0)
+        // Raises `SyntaxError: assignment expression cannot rebind lambda parameter 'x'`
+        _test_forbidden_syntax("(lambda x: (x := 3) and x**2)");
+    }
+
+    #[test]
+    fn test_walrus_conflict_with_nested_lambda_outer_parameter() {
+        // Test that outer lambda parameters cannot be rebound
+        // (lambda x: lambda y: (x := 3))(0)  # should raise SyntaxError for x
+        _test_forbidden_syntax("(lambda x: lambda y: (x := 3))");
+    }
+
+    #[test]
+    fn test_walrus_conflict_with_nested_lambda_inner_parameter() {
+        // Test that inner lambda parameters cannot be rebound
+        // (lambda x: lambda y: (y := 3))(0)  # should raise SyntaxError for y
+        _test_forbidden_syntax("(lambda x: lambda y: (y := 3))");
+    }
+
     // === F-STRING AND T-STRING TESTS ===
 
     #[test]
@@ -1732,19 +1891,6 @@ mod tests {
     }
 
     #[test]
-    fn test_lambda_with_walrus_does_not_leak() {
-        // The walrus assignment inside lambda should NOT leak to outer scope
-        // So when we use the lambda in a larger expression, the variable assigned
-        // with walrus inside the lambda remains local to the lambda
-        _test_transformation(
-            "(lambda: (y := 42) and y)",
-            r#"lambda: (y := 42) and y"#,
-            vec![],
-            vec![],
-        );
-    }
-
-    #[test]
     fn test_lambda_in_comprehension() {
         // Lambda used within a list comprehension
         // The comprehension variable 'item' should not be transformed
@@ -1795,57 +1941,6 @@ mod tests {
             r#"lambda: [item for item in variable(context, source, (26, 31), 'items') if call(context, source, (35, 66), lambda x: x > variable(context, source, (50, 59), 'threshold'), item)]"#,
             vec![("items", 26, 31, (1, 27)), ("threshold", 50, 59, (1, 51))],
             vec![],
-        );
-    }
-
-    #[test]
-    fn test_lambda_walrus_in_comprehension() {
-        // Lambda with walrus assignment inside a comprehension
-        // The walrus in the lambda should NOT leak to the comprehension or outer scope
-        _test_transformation(
-            "[lambda: (temp := item * 2) for item in items] and temp + item",
-            r#"[lambda: (temp := item * 2) for item in variable(context, source, (40, 45), 'items')] and variable(context, source, (51, 55), 'temp') + variable(context, source, (58, 62), 'item')"#,
-            vec![
-                ("items", 40, 45, (1, 41)),
-                ("temp", 51, 55, (1, 52)),
-                ("item", 58, 62, (1, 59)),
-            ],
-            vec![], // temp is not accessible outside of the lambda
-        );
-    }
-
-    #[test]
-    fn test_comprehension_walrus_in_lambda() {
-        // Assignments inside lambdas should NOT leak to assigned_vars.
-        // Note that the `+ [y]` at the end is STILL part of lambda and should NOT be transformed.
-        _test_transformation(
-            "lambda: [y for x in items if (y := x * 2)] + [y]",
-            r#"lambda: [y for x in variable(context, source, (20, 25), 'items') if (y := x * 2)] + [y]"#,
-            vec![("items", 20, 25, (1, 21))],
-            vec![], // y is not accessible outside of the lambda
-        );
-    }
-
-    #[test]
-    fn test_comprehension_walrus_in_lambda_2() {
-        // Assignments inside lambdas should NOT leak to assigned_vars.
-        // Note that the `+ [y]` at the end is STILL part of lambda and should NOT be transformed.
-        _test_transformation(
-            "(lambda: [y for x in items if (y := x * 2)] + [y])",
-            r#"lambda: [y for x in variable(context, source, (21, 26), 'items') if (y := x * 2)] + [y]"#,
-            vec![("items", 21, 26, (1, 22))],
-            vec![], // y is not accessible outside of the lambda
-        );
-    }
-
-    #[test]
-    fn test_comprehension_walrus_in_lambda_3() {
-        // Assignments inside lambdas should NOT leak to assigned_vars.
-        _test_transformation(
-            "(lambda: [y for x in items if (y := x * 2)]) + y",
-            r#"(lambda: [y for x in variable(context, source, (21, 26), 'items') if (y := x * 2)]) + variable(context, source, (47, 48), 'y')"#,
-            vec![("items", 21, 26, (1, 22)), ("y", 47, 48, (1, 48))],
-            vec![], // y is not accessible outside of the lambda
         );
     }
 
