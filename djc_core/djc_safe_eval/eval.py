@@ -173,18 +173,10 @@ def safe_eval(
     # This avoids the overhead of calling eval() and creating a dict on each evaluation
     lambda_code = f"lambda context: ({transformed_code})"
 
-    # Compile the lambda wrapper - compilation parses the code but doesn't execute it
     try:
+        # Compile the code but don't execute it
         compiled_code = compile(lambda_code, f"Expression <{source}>", "eval")
-    except SyntaxError as e:
-        # Re-raise with better context
-        raise SyntaxError(
-            f"Invalid syntax in lambda-wrapped code:\n{e}\n\nLambda code:\n{lambda_code}\n\nTransformed code:\n{transformed_code}"
-        ) from e
-
-    # Evaluate the lambda wrapper once to get the actual lambda function
-    # This captures all helper functions from the namespace in its closure
-    try:
+        # Actually execute the code
         eval_func = eval(compiled_code, eval_namespace, {})
     except Exception as e:
         # If the error hasn't been processed by error_context decorator,
