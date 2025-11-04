@@ -1157,6 +1157,68 @@ class TestSyntax:
             "b": 4,
         }
 
+    def test_transform_walrus_in_comprehension_leaks(self):
+        compiled = safe_eval("[(x := y) for y in items]")
+        context = {"items": [1, 2, 3]}
+        result = compiled(context)
+        assert result == [1, 2, 3]
+        # x should be accessible outside the comprehension (matches Python behavior)
+        assert context == {"items": [1, 2, 3], "x": 3}
+
+    def test_transform_walrus_in_comprehension_conflicts_with_variable(self):
+        with pytest.raises(
+            SyntaxError,
+            match="assignment expression cannot rebind comprehension iteration variable 'n'",
+        ):
+            safe_eval("[(n := n + 1) + n for n in items]")
+
+    def test_transform_walrus_in_comprehension_conflicts_with_variable_nested(self):
+        with pytest.raises(
+            SyntaxError,
+            match="assignment expression cannot rebind comprehension iteration variable 'x'",
+        ):
+            safe_eval("[[(x := x + 1) for y in inner] for x in outer]")
+
+    # NOTE: This diverges from Python, which allows overwriting function args by walrus
+    def test_transform_walrus_in_lambda_leaks(self):
+        compiled = safe_eval("lambda x: (y := x + 1) + y")
+        context = {}
+        fn = compiled(context)
+        result = fn(5)
+        assert result == 12  # (y := 5 + 1) + y = 6 + 6 = 12
+
+        # The important part: y SHOULD be in the context
+        assert context == {"y": 6}
+
+        # And should change again after another call
+        result2 = fn(10)
+        assert result2 == 22  # (y := 10 + 1) + y = 11 + 11 = 22
+        assert context == {"y": 11}
+
+    # NOTE: This diverges from Python, which allows overwriting function args by walrus
+    def test_transform_walrus_in_lambda_conflicts_with_variable(self):
+        with pytest.raises(
+            SyntaxError,
+            match="assignment expression cannot rebind lambda parameter 'x'",
+        ):
+            safe_eval("(lambda x: (x := 3) and x**2)")
+
+    # NOTE: This diverges from Python, which allows overwriting function args by walrus
+    def test_transform_walrus_in_lambda_conflicts_with_variable_nested_outer(self):
+        with pytest.raises(
+            SyntaxError,
+            match="assignment expression cannot rebind lambda parameter 'x'",
+        ):
+            safe_eval("(lambda x: lambda y: (x := 3))")
+
+    # NOTE: This diverges from Python, which allows overwriting function args by walrus
+    def test_transform_walrus_in_lambda_conflicts_with_variable_nested_inner(self):
+        with pytest.raises(
+            SyntaxError,
+            match="assignment expression cannot rebind lambda parameter 'y'",
+        ):
+            safe_eval("(lambda x: lambda y: (y := 3))")
+
     # === F-STRINGS ===
 
     def test_transform_fstring_simple(self):
@@ -1443,22 +1505,6 @@ class TestSyntax:
         result = fn(a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8, i=9, j=10)
         assert result == 10
         assert context == {"len": len}  # Should be unchanged
-
-    def test_lambda_walrus_does_not_leak(self):
-        """Test that walrus operator inside lambda does not add variables to context"""
-        compiled = safe_eval("lambda x: (y := x + 1) + y")
-        context = {}
-        fn = compiled(context)
-        result = fn(5)
-        assert result == 12  # (y := 5 + 1) + y = 6 + 6 = 12
-
-        # The important part: y should NOT be in the context
-        assert context == {}
-
-        # Even after multiple calls, context should remain unchanged
-        result2 = fn(10)
-        assert result2 == 22  # (y := 10 + 1) + y = 11 + 11 = 22
-        assert context == {}  # Should remain empty
 
     # === FORBIDDEN SYNTAX ===
 
