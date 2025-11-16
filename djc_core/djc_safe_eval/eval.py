@@ -171,13 +171,18 @@ def safe_eval(
 
     # Wrap the transformed code in a lambda that captures the helper functions
     # This avoids the overhead of calling eval() and creating a dict on each evaluation
-    lambda_code = f"lambda context: ({transformed_code})"
-
+    # NOTE: The lambda is assigned to a variable because we use `exec()` instead of `eval()`
+    #       to support triple-quoted multi-line strings (which `eval()` doesn't handle).
+    #       And while `eval()` returns its result directly, with `exec()` we need to assign it to a variable.
+    #       We wrap with parentheses and newlines to allow multi-line expressions and trailing comments:
+    #       the newlines ensure that trailing comments don't swallow the closing parenthesis.
+    lambda_code = f"_eval_expr = lambda context: (\n{transformed_code}\n)"
+    eval_locals = {}
     try:
-        # Compile the code but don't execute it
-        compiled_code = compile(lambda_code, f"Expression <{source}>", "eval")
-        # Actually execute the code
-        eval_func = eval(compiled_code, eval_namespace, {})
+        # Execute the function definition
+        exec(lambda_code, eval_namespace, eval_locals)
+        # Get the function from the namespace
+        eval_func = eval_locals["_eval_expr"]
     except Exception as e:
         # If the error hasn't been processed by error_context decorator,
         # include the whole expression in the error message (without the "Error in..." prefix)
@@ -189,8 +194,8 @@ def safe_eval(
             e._safe_eval_error_processed = True  # type: ignore[attr-defined]
         raise
 
-    # Return a function that calls the compiled lambda directly
-    # This is much faster than calling eval() on each evaluation
+    # Return a function that calls the compiled function directly
+    # This is much faster than calling exec() on each evaluation
     def evaluate(context: Dict[str, Any]) -> Any:
         """
         Evaluate the compiled expression with the given context.

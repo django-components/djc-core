@@ -314,6 +314,7 @@ dependencies = [
 name = "djc-safe-eval"
 version = "1.0.0"
 dependencies = [
+ "regex",
  "ruff_python_ast",
  "ruff_python_codegen",
  "ruff_python_parser",
