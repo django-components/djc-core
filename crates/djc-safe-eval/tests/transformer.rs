@@ -89,16 +89,40 @@ mod tests {
         );
     }
 
+    // Check if it's possible to escape the multiline restriction by closing the first parenthesis.
+    // This tries to exploit the fact that we wrap the entire expression in extra parentheses.
     #[test]
-    fn test_multiple_lines_escape() {
-        // NOTE: We wrap the entire Python expression in `(\n{}\n)`, so that inside the expression
-        // we can use newlines. Here we check that it's not possible to escape this simply by closing
-        // the first parenthesis.
+    fn test_multiple_lines_escape_1() {
         let result = transform_expression_string("x)\n\nimport os; os.path.join('a', 'b')\n\n(")
             .unwrap_err();
         assert_eq!(
             result,
             "Parse error: Unexpected token at the end of an expression at byte range 4..10: 'import'"
+        );
+    }
+
+    // This is the most that the logic can be "exploited" - constructing an expression
+    // that makes use of the hidden parentheses.
+    // So while `lambda x: x + 2)(5` would raise a syntax error in Python, since we wrap it
+    // in parentheses, we actually end up with `(lambda x: x + 2)(5)`, which is valid.
+    #[test]
+    fn test_multiple_lines_escape_2() {
+        _test_transformation(
+            "lambda x: x + 2)(5",
+            "call(context, source, (0, 20), lambda x: x + 2, 5)",
+            vec![],
+            vec![],
+        );
+    }
+
+    // However, it's still not possible to construct an expression that contains a statement,
+    // as this test shows.
+    #[test]
+    fn test_multiple_lines_escape_3() {
+        let result = transform_expression_string("def fn(x): x + 2)(5").unwrap_err();
+        assert_eq!(
+            result,
+            "Parse error: Expected an identifier, but found a keyword 'def' that cannot be used here at byte range 0..3: 'def'"
         );
     }
 
