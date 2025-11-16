@@ -250,9 +250,11 @@
 // - ❌                - StmtIpyEscapeCommand
 // - ❌                - ExprIpyEscapeCommand
 
+use crate::comments::extract_comments;
 use crate::utils::python_ast::{
     attribute, call, get_expr_range, interceptor_call, none_literal, string_literal,
 };
+use regex::Regex;
 use ruff_python_ast::visitor::transformer::Transformer;
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_python_parser::parse_expression;
@@ -273,6 +275,15 @@ pub struct Token {
     pub line_col: (usize, usize),
 }
 
+/// Represents a Python comment `# ...`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    /// Token containing the entire comment span including `#` and the comment text
+    pub token: Token,
+    /// Token for the comment text (without the `#` prefix)
+    pub value: Token,
+}
+
 /// Result of transforming an expression string
 #[derive(Debug, Clone)]
 pub struct TransformResult {
@@ -282,16 +293,99 @@ pub struct TransformResult {
     pub used_vars: Vec<Token>,
     /// Tokens for variables that are assigned via walrus operator (:=)
     pub assigned_vars: Vec<Token>,
+    /// Comments found in the original source
+    pub comments: Vec<Comment>,
+}
+
+/// Adjust byte ranges in error messages to account for source wrapping
+/// and append the actual text at that range.
+///
+/// So if we get error
+///
+/// `Parse error: Expected an expression or a ']' at byte range 9..10`
+///
+/// Then we adjust the range at the end to `byte range 7..8` and add the text at that range:
+///
+/// `Parse error: Expected an expression or a ']' at byte range 7..8: ')'`
+fn adjust_error_ranges(error_msg: &str, wrap_prefix_len: usize, source: &str) -> String {
+    // Pattern to match "byte range X..Y" where X and Y are numbers
+    let re = Regex::new(r"byte range (\d+)\.\.(\d+)").unwrap();
+
+    re.replace_all(error_msg, |caps: &regex::Captures| {
+        let start: usize = caps[1].parse().unwrap_or(0);
+        let end: usize = caps[2].parse().unwrap_or(0);
+        let adjusted_start = start.saturating_sub(wrap_prefix_len);
+        let adjusted_end = end.saturating_sub(wrap_prefix_len);
+
+        // Extract the text at the adjusted range from the original source
+        let range_text = if adjusted_start < adjusted_end && adjusted_end <= source.len() {
+            &source[adjusted_start..adjusted_end]
+        } else {
+            ""
+        };
+
+        // Format with the range and the text (if available)
+        if !range_text.is_empty() {
+            format!(
+                "byte range {}..{}: '{}'",
+                adjusted_start, adjusted_end, range_text
+            )
+        } else {
+            format!("byte range {}..{}", adjusted_start, adjusted_end)
+        }
+    })
+    .to_string()
+}
+
+/// Adjust token positions from wrapped source coordinates to original source coordinates
+fn adjust_token_position(
+    start: usize,
+    end: usize,
+    line_index: &LineIndex,
+    wrapped_source: &str,
+    wrap_prefix_len: usize,
+) -> (usize, usize, usize, usize) {
+    // Convert byte offset to line/column (only for start position)
+    let start_pos =
+        line_index.line_column(ruff_text_size::TextSize::from(start as u32), wrapped_source);
+
+    // Adjust positions: line minus one, col remains same, index minus two
+    // start_pos.line is 0-indexed in wrapped source, convert to 1-indexed then subtract 1
+    let wrapped_line_1_indexed = start_pos.line.to_zero_indexed() + 1;
+    let adjusted_line = wrapped_line_1_indexed.saturating_sub(1);
+    let adjusted_col = start_pos.column.to_zero_indexed() + 1;
+    let adjusted_start = start.saturating_sub(wrap_prefix_len);
+    let adjusted_end = end.saturating_sub(wrap_prefix_len);
+
+    (adjusted_start, adjusted_end, adjusted_line, adjusted_col)
 }
 
 /// The main entry point for transforming an expression string.
 /// Returns the transformed expression along with tokens for variables used and assigned.
 pub fn transform_expression_string(source: &str) -> Result<TransformResult, String> {
-    let transformer = SandboxTransformer::new();
-    let ast = parse_expression(source).map_err(|e| format!("Parse error: {}", e))?;
+    // Wrap the expression in (\n{}\n) to allow multi-line expressions and trailing comments.
+    // This is because in Python when we're inside an expression like inside `(...)`, `[...]`, or `{...}`,
+    // then Python does care about the newlines and whitespace indentation.
+    //
+    // So even something like this is valid:
+    // ```py
+    // [
+    //   1,
+    //     2, 3,
+    // 4,
+    // ]
+    // ```
+    let wrapped_source = format!("(\n{}\n)", source);
+    let wrap_prefix_len = 2; // "(\n" = 2 characters
+
+    let transformer = SandboxTransformer::new(wrap_prefix_len);
+    let ast = parse_expression(&wrapped_source).map_err(|e| {
+        let error_msg = format!("Parse error: {}", e);
+        adjust_error_ranges(&error_msg, wrap_prefix_len, source)
+    })?;
 
     // Create a LineIndex to convert byte offsets to line/column positions
-    let line_index = LineIndex::from_source_text(source);
+    let line_index = LineIndex::from_source_text(&wrapped_source);
 
     // The top-level AST for an expression is an `ast::Mod::Expression`.
     // We want to transform the single expression inside it.
@@ -312,25 +406,22 @@ pub fn transform_expression_string(source: &str) -> Result<TransformResult, Stri
         .get_used_variables()
         .into_iter()
         .map(|(name, start, end)| {
-            // Convert byte offset to line/column (only for start position)
-            let start_pos =
-                line_index.line_column(ruff_text_size::TextSize::from(start as u32), source);
-
             // Extract the variable name from the source text for token content
-            let content = if start < end && end <= source.len() {
-                source[start..end].to_string()
+            let content = if start < end && end <= wrapped_source.len() {
+                wrapped_source[start..end].to_string()
             } else {
                 name.clone()
             };
 
+            // Adjust positions from wrapped source to original source
+            let (adjusted_start, adjusted_end, adjusted_line, adjusted_col) =
+                adjust_token_position(start, end, &line_index, &wrapped_source, wrap_prefix_len);
+
             Token {
                 content,
-                start_index: start,
-                end_index: end,
-                line_col: (
-                    start_pos.line.to_zero_indexed() + 1,   // Convert to 1-indexed
-                    start_pos.column.to_zero_indexed() + 1, // Convert to 1-indexed
-                ),
+                start_index: adjusted_start,
+                end_index: adjusted_end,
+                line_col: (adjusted_line, adjusted_col),
             }
         })
         .collect();
@@ -342,35 +433,62 @@ pub fn transform_expression_string(source: &str) -> Result<TransformResult, Stri
         .get_assignments()
         .into_iter()
         .map(|(name, start, end)| {
-            // Convert byte offset to line/column (only for start position)
-            let start_pos =
-                line_index.line_column(ruff_text_size::TextSize::from(start as u32), source);
-
             // Extract the variable name from the source text for token content
-            let content = if start < end && end <= source.len() {
-                source[start..end].to_string()
+            let content = if start < end && end <= wrapped_source.len() {
+                wrapped_source[start..end].to_string()
             } else {
                 name.clone()
             };
 
+            // Adjust positions from wrapped source to original source
+            let (adjusted_start, adjusted_end, adjusted_line, adjusted_col) =
+                adjust_token_position(start, end, &line_index, &wrapped_source, wrap_prefix_len);
+
             Token {
                 content,
-                start_index: start,
-                end_index: end,
-                line_col: (
-                    start_pos.line.to_zero_indexed() + 1,   // Convert to 1-indexed
-                    start_pos.column.to_zero_indexed() + 1, // Convert to 1-indexed
-                ),
+                start_index: adjusted_start,
+                end_index: adjusted_end,
+                line_col: (adjusted_line, adjusted_col),
             }
         })
         .collect();
     // Sort by start_index for consistent output
     assigned_vars.sort_by(|a, b| a.start_index.cmp(&b.start_index));
 
+    // Extract comments from wrapped source, then adjust their positions
+    let mut comments = extract_comments(&wrapped_source)?;
+    // Adjust comment positions: line minus one, col remains same, index minus two
+    for comment in &mut comments {
+        // Adjust token position
+        let (adjusted_start, adjusted_end, adjusted_line, adjusted_col) = adjust_token_position(
+            comment.token.start_index,
+            comment.token.end_index,
+            &line_index,
+            &wrapped_source,
+            wrap_prefix_len,
+        );
+        comment.token.start_index = adjusted_start;
+        comment.token.end_index = adjusted_end;
+        comment.token.line_col = (adjusted_line, adjusted_col);
+
+        // Adjust value position
+        let (adjusted_start, adjusted_end, adjusted_line, adjusted_col) = adjust_token_position(
+            comment.value.start_index,
+            comment.value.end_index,
+            &line_index,
+            &wrapped_source,
+            wrap_prefix_len,
+        );
+        comment.value.start_index = adjusted_start;
+        comment.value.end_index = adjusted_end;
+        comment.value.line_col = (adjusted_line, adjusted_col);
+    }
+
     Ok(TransformResult {
         expression: expr,
         used_vars,
         assigned_vars,
+        comments,
     })
 }
 
@@ -407,17 +525,33 @@ pub struct SandboxTransformer {
     // We use a Vec to store all occurrences with their positions.
     // Each tuple is (variable_name, start_index, end_index).
     used_variables: RefCell<Vec<(String, usize, usize)>>,
+    // Offset to adjust ranges from wrapped source back to original source
+    wrap_prefix_len: usize,
 }
 
 impl SandboxTransformer {
-    pub fn new() -> Self {
+    pub fn new(wrap_prefix_len: usize) -> Self {
         Self {
             comprehension_variables: RefCell::new(HashSet::new()),
             lambda_variables: RefCell::new(HashSet::new()),
             validation_error: RefCell::new(None),
             assignments: RefCell::new(Vec::new()),
             used_variables: RefCell::new(Vec::new()),
+            wrap_prefix_len,
         }
+    }
+
+    /// Adjust a TextRange from wrapped source coordinates to original source coordinates
+    fn adjust_range(&self, range: ruff_text_size::TextRange) -> ruff_text_size::TextRange {
+        let start = range
+            .start()
+            .to_usize()
+            .saturating_sub(self.wrap_prefix_len);
+        let end = range.end().to_usize().saturating_sub(self.wrap_prefix_len);
+        ruff_text_size::TextRange::new(
+            ruff_text_size::TextSize::from(start as u32),
+            ruff_text_size::TextSize::from(end as u32),
+        )
     }
 
     /// Create a new SandboxTransformer with additional local variables
@@ -442,6 +576,7 @@ impl SandboxTransformer {
             lambda_variables: RefCell::new(new_lambda_vars),
             validation_error: RefCell::new(self.validation_error.borrow().clone()),
             assignments: RefCell::new(Vec::new()),
+            wrap_prefix_len: self.wrap_prefix_len,
             used_variables: RefCell::new(Vec::new()),
         }
     }
@@ -766,8 +901,13 @@ impl Transformer for SandboxTransformer {
                     let var_name_literal = string_literal(&var_name, range);
 
                     // `variable(context, source, (start_index, end_index), "var_name")`
-                    let call_expr =
-                        interceptor_call("variable", vec![var_name_literal], vec![], range);
+                    let adjusted_range = self.adjust_range(range);
+                    let call_expr = interceptor_call(
+                        "variable",
+                        vec![var_name_literal],
+                        vec![],
+                        adjusted_range,
+                    );
 
                     // Replace the current expression with the call
                     *expr = call_expr;
@@ -789,11 +929,12 @@ impl Transformer for SandboxTransformer {
                 args.extend(call_expr.arguments.args.to_vec());
 
                 // `call(context, source, (start_index, end_index), fn, *args, **kwargs)`
+                let adjusted_range = self.adjust_range(call_expr.range);
                 let wrapper_call = interceptor_call(
                     "call",
                     args,
                     call_expr.arguments.keywords.to_vec(),
-                    call_expr.range,
+                    adjusted_range,
                 );
 
                 // Replace the current expression with the wrapper call
@@ -819,11 +960,12 @@ impl Transformer for SandboxTransformer {
                 let attr_name_literal = string_literal(&attr_name, range);
 
                 // `attribute(context, source, (start_index, end_index), obj, "attr_name")`
+                let adjusted_range = self.adjust_range(range);
                 let wrapper_call = interceptor_call(
                     "attribute",
                     vec![*attr.value.clone(), attr_name_literal],
                     vec![],
-                    range,
+                    adjusted_range,
                 );
 
                 // Replace the current expression with the wrapper call
@@ -841,11 +983,12 @@ impl Transformer for SandboxTransformer {
                 let range = subscript.range;
 
                 // `subscript(context, source, (start_index, end_index), obj, key)`
+                let adjusted_range = self.adjust_range(range);
                 let wrapper_call = interceptor_call(
                     "subscript",
                     vec![*subscript.value.clone(), *subscript.slice.clone()],
                     vec![],
-                    range,
+                    adjusted_range,
                 );
 
                 // Replace the current expression with the wrapper call
@@ -893,7 +1036,8 @@ impl Transformer for SandboxTransformer {
                 ];
 
                 // `slice(context, source, (start_index, end_index), lower, upper, step)`
-                let slice_call = interceptor_call("slice", slice_args, vec![], range);
+                let adjusted_range = self.adjust_range(range);
+                let slice_call = interceptor_call("slice", slice_args, vec![], adjusted_range);
 
                 // Replace the current expression with the slice() call
                 *expr = slice_call;
@@ -953,11 +1097,12 @@ impl Transformer for SandboxTransformer {
                 let var_name_literal = string_literal(&var_name, range);
 
                 // `assign(context, source, (start_index, end_index), "var_name", value)`
+                let adjusted_range = self.adjust_range(range);
                 let wrapper_call = interceptor_call(
                     "assign",
                     vec![var_name_literal, *named.value.clone()],
                     vec![],
-                    range,
+                    adjusted_range,
                 );
 
                 // Replace the current expression with the wrapper call
@@ -1009,15 +1154,14 @@ impl Transformer for SandboxTransformer {
                                     // - dynamic expression (`{width}.{precision}f`)
                                     // We don't call built-in `format()` here; we pass the format spec as metadata
                                     // and let our `format()` interceptor handle it.
-                                    let format_spec_expr = if let Some(format_spec) =
-                                        &mut interpolation.format_spec
-                                    {
-                                        // Build the format spec - can be static or dynamic
-                                        let mut spec_template_parts = Vec::new();
-                                        let mut spec_format_args = Vec::new();
+                                    let format_spec_expr =
+                                        if let Some(format_spec) = &mut interpolation.format_spec {
+                                            // Build the format spec - can be static or dynamic
+                                            let mut spec_template_parts = Vec::new();
+                                            let mut spec_format_args = Vec::new();
 
-                                        for spec_element in format_spec.elements.iter_mut() {
-                                            match spec_element {
+                                            for spec_element in format_spec.elements.iter_mut() {
+                                                match spec_element {
                                                 ast::InterpolatedStringElement::Literal(lit) => {
                                                     spec_template_parts.push(lit.value.to_string());
                                                 }
@@ -1037,37 +1181,37 @@ impl Transformer for SandboxTransformer {
                                                         .push(*spec_interp.expression.clone());
                                                 }
                                             }
-                                        }
+                                            }
 
-                                        let spec_template_str = spec_template_parts.join("");
+                                            let spec_template_str = spec_template_parts.join("");
 
-                                        // Build the format spec expression
-                                        if spec_format_args.is_empty() {
-                                            // Static format spec - just use a string literal
-                                            string_literal(&spec_template_str, expr_range)
+                                            // Build the format spec expression
+                                            if spec_format_args.is_empty() {
+                                                // Static format spec - just use a string literal
+                                                string_literal(&spec_template_str, expr_range)
+                                            } else {
+                                                // Dynamic format spec - we need to pass both template and args
+                                                // We'll pass this as a tuple: (template, *args)
+                                                let spec_template_literal =
+                                                    string_literal(&spec_template_str, expr_range);
+                                                // Create a tuple: (template, arg1, arg2, ...)
+                                                Expr::Tuple(ast::ExprTuple {
+                                                    node_index: Default::default(),
+                                                    range: expr_range,
+                                                    ctx: ast::ExprContext::Load,
+                                                    parenthesized: false,
+                                                    elts: {
+                                                        let mut tuple_elts =
+                                                            vec![spec_template_literal];
+                                                        tuple_elts.extend(spec_format_args);
+                                                        tuple_elts.into()
+                                                    },
+                                                })
+                                            }
                                         } else {
-                                            // Dynamic format spec - we need to pass both template and args
-                                            // We'll pass this as a tuple: (template, *args)
-                                            let spec_template_literal =
-                                                string_literal(&spec_template_str, expr_range);
-                                            // Create a tuple: (template, arg1, arg2, ...)
-                                            Expr::Tuple(ast::ExprTuple {
-                                                node_index: Default::default(),
-                                                range: expr_range,
-                                                ctx: ast::ExprContext::Load,
-                                                parenthesized: false,
-                                                elts: {
-                                                    let mut tuple_elts =
-                                                        vec![spec_template_literal];
-                                                    tuple_elts.extend(spec_format_args);
-                                                    tuple_elts.into()
-                                                },
-                                            })
-                                        }
-                                    } else {
-                                        // No format spec - use empty string
-                                        string_literal("", expr_range)
-                                    };
+                                            // No format spec - use empty string
+                                            string_literal("", expr_range)
+                                        };
 
                                     // Add simple placeholder to template
                                     template_parts.push("{}".to_string());
@@ -1104,8 +1248,9 @@ impl Transformer for SandboxTransformer {
                 let mut format_args_with_template = vec![template_literal];
                 format_args_with_template.extend(format_args);
 
+                let adjusted_range = self.adjust_range(range);
                 let format_call =
-                    interceptor_call("format", format_args_with_template, vec![], range);
+                    interceptor_call("format", format_args_with_template, vec![], adjusted_range);
 
                 // Replace the f-string with the intercepted format() call
                 *expr = format_call;
@@ -1212,6 +1357,8 @@ impl Transformer for SandboxTransformer {
 
                                 // `interpolation(context, source, token, value, expression, conversion, format_spec)`
                                 // Use interpolation.range for error reporting to point to the exact {expression!r:format} location
+                                let adjusted_interpolation_range =
+                                    self.adjust_range(interpolation.range);
                                 let interpolation_call = interceptor_call(
                                     "interpolation",
                                     vec![
@@ -1221,7 +1368,7 @@ impl Transformer for SandboxTransformer {
                                         format_spec_expr,
                                     ],
                                     vec![],
-                                    interpolation.range,
+                                    adjusted_interpolation_range,
                                 );
 
                                 template_args.push(interpolation_call);
@@ -1231,7 +1378,9 @@ impl Transformer for SandboxTransformer {
                 }
 
                 // `template(context, source, token, ...)`
-                let template_call = interceptor_call("template", template_args, vec![], range);
+                let adjusted_range = self.adjust_range(range);
+                let template_call =
+                    interceptor_call("template", template_args, vec![], adjusted_range);
 
                 // Replace the t-string with the template() call
                 *expr = template_call;
