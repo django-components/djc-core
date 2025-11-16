@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use djc_safe_eval::codegen::generate_python_code;
-    use djc_safe_eval::transformer::transform_expression_string;
+    use djc_safe_eval::transformer::{Comment, Token, transform_expression_string};
 
     fn _test_transformation(
         input: &str,
@@ -78,6 +78,31 @@ mod tests {
     }
 
     #[test]
+    fn test_multiple_lines() {
+        // NOTE: Altho we could technically handle this, we allow only a single expression,
+        //       and this contains 2 statements/expressions, which raises an error.
+        //       In this case the actual error message doesn't matter that much, as long as we raise here.
+        let result = transform_expression_string("x\n y").unwrap_err();
+        assert_eq!(
+            result,
+            "Parse error: Expected ')', found name at byte range 3..4: 'y'"
+        );
+    }
+
+    #[test]
+    fn test_multiple_lines_escape() {
+        // NOTE: We wrap the entire Python expression in `(\n{}\n)`, so that inside the expression
+        // we can use newlines. Here we check that it's not possible to escape this simply by closing
+        // the first parenthesis.
+        let result = transform_expression_string("x)\n\nimport os; os.path.join('a', 'b')\n\n(")
+            .unwrap_err();
+        assert_eq!(
+            result,
+            "Parse error: Unexpected token at the end of an expression at byte range 4..10: 'import'"
+        );
+    }
+
+    #[test]
     fn test_allow_comments() {
         _test_transformation("1 # comment", "1", vec![], vec![]);
     }
@@ -149,6 +174,27 @@ mod tests {
     #[test]
     fn test_allow_list_with_literals() {
         _test_transformation("[1, 2, 3]", "[1, 2, 3]", vec![], vec![]);
+    }
+
+    #[test]
+    fn test_allow_multiline_expr() {
+        // Note: The code generator doesn't preserve formatting, so output is on one line
+        _test_transformation("[\n  1,\n  2,\n  3\n]", "[1, 2, 3]", vec![], vec![]);
+    }
+
+    #[test]
+    fn test_allow_multiline_with_variables() {
+        // Note: The code generator doesn't preserve formatting, so output is on one line
+        _test_transformation(
+            "[\n  x,\n  y,\n  z\n]",
+            "[variable(context, source, (4, 5), 'x'), variable(context, source, (9, 10), 'y'), variable(context, source, (14, 15), 'z')]",
+            vec![
+                ("x", 4, 5, (2, 3)),
+                ("y", 9, 10, (3, 3)),
+                ("z", 14, 15, (4, 3)),
+            ],
+            vec![],
+        );
     }
 
     #[test]
@@ -2414,6 +2460,186 @@ mod tests {
             "[x for x in variable(context, source, (12, 17), 'items') for y in attribute(context, source, (27, 37), x, 'children') if y > 0]",
             vec![("items", 12, 17, (1, 13))],
             vec![],
+        );
+    }
+
+    // === COMMENT EXTRACTION TESTS ===
+
+    fn _token(content: &str, start_index: usize, line: usize, col: usize) -> Token {
+        Token {
+            content: content.to_string(),
+            start_index,
+            end_index: start_index + content.len(),
+            line_col: (line, col),
+        }
+    }
+
+    #[test]
+    fn test_simple_comment_extraction() {
+        let result = transform_expression_string("1 # comment").unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# comment", 2, 1, 3),
+                value: _token(" comment", 3, 1, 4),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_comment_at_end_of_input() {
+        let result = transform_expression_string("42#end").unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("#end", 2, 1, 3),
+                value: _token("end", 3, 1, 4),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_comment_inside_string_not_extracted() {
+        let result = transform_expression_string(r#""text # not a comment""#).unwrap();
+        assert_eq!(result.comments, vec![]);
+    }
+
+    #[test]
+    fn test_comment_after_string_extracted() {
+        let result = transform_expression_string(r#""t#xt" # this is a comment"#).unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# this is a comment", 7, 1, 8),
+                value: _token(" this is a comment", 8, 1, 9),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_multiline_string_with_comment() {
+        // Newlines in triple-quoted strings are preserved (will work with exec())
+        let result = transform_expression_string("\"\"\"my\n#tring\"\"\" # comment").unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# comment", 16, 2, 11),
+                value: _token(" comment", 17, 2, 12),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_string_with_escape_sequence() {
+        let result = transform_expression_string(r##""t#xt \"qu#te\"#" # after"##).unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# after", 18, 1, 19),
+                value: _token(" after", 19, 1, 20),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_raw_string_with_escape_sequence() {
+        let result = transform_expression_string(r##"r"t#xt \"qu#te\"#" # after"##).unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# after", 19, 1, 20),
+                value: _token(" after", 20, 1, 21),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_comment_before_string() {
+        let source = r#"1# comment before"text""#;
+        let result = transform_expression_string(source).unwrap();
+        // When there's no newline, the comment extends to the end of input
+        // So the comment includes " comment before"text""
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token(&source[1..], 1, 1, 2),
+                value: _token(&source[2..], 2, 1, 3),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_nested_strings() {
+        // String containing quote characters
+        let result = transform_expression_string(r#""ou#ter 'in#ner' ou#ter""#).unwrap();
+        assert_eq!(result.comments, vec![]);
+    }
+
+    #[test]
+    fn test_triple_quotes_in_single_quote_string() {
+        // Triple quotes inside a single-quote string should not close it
+        let result =
+            transform_expression_string(r#"'''te#xt \"\"\" ins#ide\"\"\te#xt2'''"#).unwrap();
+        assert_eq!(result.comments, vec![]);
+    }
+
+    #[test]
+    fn test_empty_comment() {
+        let result = transform_expression_string("x #").unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("#", 2, 1, 3),
+                value: _token("", 3, 1, 4),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_comment_with_carriage_return() {
+        let result = transform_expression_string("[x, # comment\r\nnext]").unwrap();
+        assert_eq!(
+            result.comments,
+            vec![Comment {
+                token: _token("# comment", 4, 1, 5),
+                value: _token(" comment", 5, 1, 6),
+            }],
+        );
+    }
+
+    #[test]
+    fn test_multiline_string_with_escaped_newline() {
+        // Escaped newline in non-raw string should not be replaced
+        let result = transform_expression_string(r#""line1\\nline2""#).unwrap();
+        assert_eq!(result.comments, vec![]);
+    }
+
+    #[test]
+    fn test_complex_expression_with_comments() {
+        let result = transform_expression_string(
+            "[      # comment 1\n  1,   # comment 2\n  2,   # comment 3\n]       # comment 4",
+        )
+        .unwrap();
+        assert_eq!(
+            result.comments,
+            vec![
+                Comment {
+                    token: _token("# comment 1", 7, 1, 8),
+                    value: _token(" comment 1", 8, 1, 9),
+                },
+                Comment {
+                    token: _token("# comment 2", 26, 2, 8),
+                    value: _token(" comment 2", 27, 2, 9),
+                },
+                Comment {
+                    token: _token("# comment 3", 45, 3, 8),
+                    value: _token(" comment 3", 46, 3, 9),
+                },
+                Comment {
+                    token: _token("# comment 4", 65, 4, 9),
+                    value: _token(" comment 4", 66, 4, 10),
+                },
+            ],
         );
     }
 }

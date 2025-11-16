@@ -42,6 +42,20 @@ class Obj:
 
 
 class TestSyntax:
+    def test_allow_multiline(self):
+        compiled = safe_eval("[\n  1,\n  2,\n  3\n]")
+        context = {}
+        result = compiled(context)
+        assert result == [1, 2, 3]
+        assert context == {}
+
+    def test_allow_multiline_with_variables(self):
+        compiled = safe_eval("[\n  x,\n  y,\n  z\n]")
+        context = {"x": 10, "y": 20, "z": 30}
+        result = compiled(context)
+        assert result == [10, 20, 30]
+        assert context == {"x": 10, "y": 20, "z": 30}
+
     # === LITERALS ===
 
     def test_allow_literal_string(self):
@@ -1781,7 +1795,9 @@ class TestUsage:
     def test_syntax_error(self):
         with pytest.raises(
             SyntaxError,
-            match="Unexpected token at the end of an expression at byte range 2..4",
+            match=re.escape(
+                "Parse error: Expected an expression or a ']' at byte range 7..8: ')'"
+            ),
         ):
             safe_eval("x := [1)")
 

@@ -33,6 +33,7 @@ expression, but also collects metadata for the linter about:
 
 1. What variables were used in the expression
 2. What variables were introduced in the expression using walrus operator `x := 1`
+3. What comments were found in the expression (including their positions and text)
 
 ## Usage
 
@@ -248,6 +249,39 @@ _This section describes the features enforced on the compiler (Rust) level._
 The entire python code must be a SINGLE [expression](https://docs.python.org/3/library/ast.html#expressions). As a rule of thumb, anything that can be assigned to a variable is an expression. So even, `a and b` or `c + d` are both still just a single expression.
 
 For simplicity we don't allow async features like async comprehensions.
+
+### Comments
+
+Python comments (`# ...`) are supported and are captured during parsing. Comments are preserved with their positions and text content, allowing linters and other tools to analyze them.
+
+```python
+compiled = safe_eval("x + 1  # Add one to x")
+```
+
+### Multiline expressions
+
+Multiline expressions are supported. When an expression spans multiple lines, it is automatically wrapped in parentheses with newlines: `(\n{}\n)`. This wrapping serves two purposes:
+
+1. **Enables multiline syntax**: In Python, when you're inside parentheses `(...)`, square brackets `[...]`, or curly braces `{...}`, Python ignores indentation and allows expressions to span multiple lines. This means you can write:
+
+   ```python
+   [
+     1,
+       2,
+         3,
+   ]
+   ```
+
+   Without the wrapping, Python would require proper indentation.
+
+2. **Allows trailing comments**: So we wrap the original expression in `(...)`. If used decided to add a comment after the expression, the comment would consume the closing `)`. Hence, we also add newlines so that `(` and `)` are on separate lines:
+
+   ```
+   (2 + 2  # comment)      ❌ Comment consumes the ')'
+   (\n2 + 2  # comment\n)  ✅ Comment is on separate line
+   ```
+
+The wrapping is transparent to users - all token positions (variables, comments, etc.) are automatically adjusted to reference the original unwrapped source positions.
 
 ### Supported syntax
 
