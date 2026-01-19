@@ -29,18 +29,27 @@
 //! use crate::djc_template_parser::ast::*;
 //!
 //! // A Django tag: {% my_tag key=val %}
-//! let tag = Tag {
-//!     token: Token {
-//!         content: "{% my_tag key=val %}".to_string(),
-//!         start_index: 0,
-//!         end_index: 20,
-//!         line_col: (1, 1),
-//!     },
-//!     name: Token {
-//!         content: "my_tag".to_string(),
-//!         start_index: 3,
-//!         end_index: 9,
-//!         line_col: (1, 4),
+//! let tag = Tag::Generic(GenericTag {
+//!     meta: TagMeta {
+//!         token: Token {
+//!             content: "{% my_tag key=val %}".to_string(),
+//!             start_index: 0,
+//!             end_index: 20,
+//!             line_col: (1, 1),
+//!         },
+//!         name: Token {
+//!             content: "my_tag".to_string(),
+//!             start_index: 3,
+//!             end_index: 9,
+//!             line_col: (1, 4),
+//!         },
+//!         used_variables: vec![Token {
+//!             content: "val".to_string(),
+//!             start_index: 14,
+//!             end_index: 17,
+//!             line_col: (1, 15),
+//!         }],
+//!         assigned_variables: vec![],
 //!     },
 //!     attrs: vec![TagAttr {
 //!         token: Token {
@@ -83,14 +92,7 @@
 //!         is_flag: false,
 //!     }],
 //!     is_self_closing: false,
-//!     used_variables: vec![Token {
-//!         content: "val".to_string(),
-//!         start_index: 14,
-//!         end_index: 17,
-//!         line_col: (1, 15),
-//!     }],
-//!     assigned_variables: vec![],
-//! };
+//! });
 //! ```
 
 use pyo3::prelude::*;
