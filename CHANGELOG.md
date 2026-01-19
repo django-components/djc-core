@@ -1,5 +1,11 @@
 # Release notes
 
+## v1.1.1
+
+- Add pre-built wheels for:
+  - Windows - Python 3.8
+  - MacOS - Python 3.8, 3.9, 3.10
+
 ## v1.1.0
 
 - Renamed package from `djc-core-html-parser` to `djc-core`
