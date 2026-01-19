@@ -70,6 +70,9 @@ jobs:
             target: armv7
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -97,6 +100,9 @@ jobs:
             target: x86
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       # Explicitly install all supported versions of Python on Windows.
       # Otherwise, as of Jan 2026, if we installed only Python 3.14,
       # then the Windows runner would NOT generate wheels for Python 3.8.
@@ -160,6 +166,9 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       # Explicitly install all supported versions of Python on macOS.
       # Otherwise, as of Jan 2026, if we installed only Python 3.14,
       # then the macOS runner would NOT generate wheels for Python 3.8, 3.9, 3.10.
@@ -215,6 +224,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
