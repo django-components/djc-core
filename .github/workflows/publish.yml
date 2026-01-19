@@ -160,9 +160,9 @@ jobs:
     strategy:
       matrix:
         platform:
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64
-          - runner: macos-14
+          - runner: macos-latest
             target: aarch64
     steps:
       - uses: actions/checkout@v6
@@ -175,9 +175,9 @@ jobs:
       # See https://github.com/django-components/djc-core/issues/22
       # And https://pypi.org/project/djc-core/1.1.0/#files
       #
-      # NOTE: Python 3.8 and 3.9 are not available on macOS ARM64 runners (macos-14 with 'aarch64' target)
+      # NOTE: Python 3.8 and 3.9 are not available on macOS ARM64 runners (macos-latest with 'aarch64' target)
       # They were removed from the runner images, so we skip them on ARM64 to avoid build failures.
-      # They are still built on Intel macOS (macos-13 with x86_64).
+      # They are still built on Intel macOS (macos-15-intel with x86_64).
       - name: Setup Python 3.8
         if: matrix.platform.target != 'aarch64'
         uses: actions/setup-python@v6
