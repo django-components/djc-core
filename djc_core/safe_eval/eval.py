@@ -1,9 +1,9 @@
 import builtins
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
-from djc_core.djc_core import safe_eval as safe_eval_rust
-from djc_core.djc_safe_eval.error import error_context, _format_error_with_context
-from djc_core.djc_safe_eval.sandbox import (
+from djc_core.rust import safe_eval as safe_eval_module
+from djc_core.safe_eval.error import error_context, _format_error_with_context
+from djc_core.safe_eval.sandbox import (
     is_safe_attribute,
     is_safe_callable,
     is_safe_variable,
@@ -24,7 +24,7 @@ def safe_eval(
     validate_subscript: Optional[Callable[[Any, Any], bool]] = None,
     validate_callable: Optional[Callable[[Callable], bool]] = None,
     validate_assign: Optional[Callable[[str, Any], bool]] = None,
-) -> Callable[[Dict[str, Any]], Any]:
+) -> Callable[[Mapping[str, Any]], Any]:
     """
     Compile a Python expression string into a safe evaluation function.
 
@@ -43,8 +43,8 @@ def safe_eval(
         validate_assign: Optional extra validation for variable assignments.
 
     Returns:
-        A compiled function that takes a context dictionary and evaluates the expression.
-        The function signature is: `func(context: Dict[str, Any]) -> Any`
+        A compiled function that takes a context mapping and evaluates the expression.
+        The function signature is: `func(context: Mapping[str, Any]) -> Any`
 
         The returned function may raise SecurityError if the expression is unsafe.
 
@@ -167,7 +167,7 @@ def safe_eval(
     }
 
     # Get transformed code from Rust
-    transformed_code = safe_eval_rust(source)
+    transformed_code = safe_eval_module.safe_eval(source)
 
     # Wrap the transformed code in a lambda that captures the helper functions
     # This avoids the overhead of calling eval() and creating a dict on each evaluation
@@ -177,48 +177,50 @@ def safe_eval(
     #       We wrap with parentheses and newlines to allow multi-line expressions and trailing comments:
     #       the newlines ensure that trailing comments don't swallow the closing parenthesis.
     lambda_code = f"_eval_expr = lambda context: (\n{transformed_code}\n)"
-    eval_locals = {}
+
+    return _exec_func_with_error_handling(lambda_code, "_eval_expr", source, "expression", eval_namespace)
+
+
+# NOTE: This is used also in djc_template_parser.
+def _exec_func_with_error_handling(func_string: str, func_name: str, source: str, kind: str, global_scope: Mapping[str, Any]) -> Callable[..., Any]:
+    local_scope = {}
+
+    # The `func_string` code should create a function and assign it to the local_scope[func_name] variable.
+    # We do so to avoid the overhead of calling `exec()` on each evaluation.
     try:
-        # Execute the function definition
-        exec(lambda_code, eval_namespace, eval_locals)
-        # Get the function from the namespace
-        eval_func = eval_locals["_eval_expr"]
+        exec(func_string, global_scope, local_scope)
     except Exception as e:
-        # If the error hasn't been processed by error_context decorator,
+        # If the error hasn't been processed by `error_context` decorator,
         # include the whole expression in the error message (without the "Error in..." prefix)
-        if not getattr(e, "_safe_eval_error_processed", False):
+        if not getattr(e, "_error_processed", False):
             _format_error_with_context(
-                e, source, 0, len(source), "expression", add_prefix=False
+                e, source, 0, len(source), kind, add_prefix=False
             )
             # Mark it as processed to avoid double-formatting if re-raised
-            e._safe_eval_error_processed = True  # type: ignore[attr-defined]
+            e._error_processed = True  # type: ignore[attr-defined]
         raise
+    else:
+        # Get the function from the local scope
+        compiled_func = local_scope[func_name]
 
-    # Return a function that calls the compiled function directly
-    # This is much faster than calling exec() on each evaluation
-    def evaluate(context: Dict[str, Any]) -> Any:
-        """
-        Evaluate the compiled expression with the given context.
-
-        Args:
-            context: Dictionary of variables to use in evaluation.
-
-        Returns:
-            The result of evaluating the expression.
-        """
+    # Return a function that calls the compiled function
+    # We return this wrapper function so that we can intercept errors and add context to the error message.
+    def evaluate(*args, **kwargs) -> Any:
+        """Evaluate the compiled function with the given arguments."""
         try:
-            return eval_func(context)
+            return compiled_func(*args, **kwargs)
         except Exception as e:
-            # If the error hasn't been processed by error_context decorator,
-            # include the whole expression in the error message (without the "Error in..." prefix)
-            if not getattr(e, "_safe_eval_error_processed", False):
+            # If the error hasn't been processed by `error_context` decorator,
+            # include the whole source code in the error message (without the "Error in..." prefix)
+            if not getattr(e, "_error_processed", False):
                 _format_error_with_context(
-                    e, source, 0, len(source), "expression", add_prefix=False
+                    e, source, 0, len(source), kind, add_prefix=False
                 )
                 # Mark it as processed to avoid double-formatting if re-raised
-                e._safe_eval_error_processed = True  # type: ignore[attr-defined]
+                e._error_processed = True  # type: ignore[attr-defined]
             raise
 
+    evaluate._source_code = func_string
     return evaluate
 
 

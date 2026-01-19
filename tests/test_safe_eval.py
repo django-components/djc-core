@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
 
 import pytest
-from djc_core import SecurityError, safe_eval, unsafe
+from djc_core.safe_eval import safe_eval, SecurityError, unsafe
 
 # Check if t-strings are supported (Python 3.14+)
 try:

@@ -21,6 +21,7 @@ The parser supports:
 - Numbers (e.g. `1`, `1.23`, `1e-10`)
 - Variables (e.g. `val`, `key`)
 - Translation strings (e.g. `_("text")`)
+- Python expressions (e.g. `("YES" if condition else "NO")`, `(my_item[0].name.upper())`)
 - Comments (e.g. `{# comment #}`)
 - Self-closing tags (e.g. `{% my_tag / %}`)
 
@@ -204,7 +205,7 @@ The template syntax parsing was implemented using [Pest](https://pest.rs/). Pest
 
 3. Constructing the AST.
 
-    The AST consists of these nodes - Tag, TagAttr, TagToken, TagValue, TagValueFilter
+    The AST consists of these nodes - Tag, TagAttr, Token, TagValue, TagValueFilter
 
     - `Tag` - the entire `{% ... %}`, e.g `{% my_tag x ...[1, 2, 3] key=val / %}`
 
@@ -221,7 +222,7 @@ The template syntax parsing was implemented using [Pest](https://pest.rs/). Pest
    - Any TagValue can have 0 or more filters applied to it. Filters have a name and an optional argument, e.g. `3|add:2` - filter name `add`, arg `2`. These filters are held by `TagValueFilter`.
      - While the filter name is a plain identifier, the argument can be yet another TagValue. so even using literal lists and dicts at the position of filter argument is permitted, e.g. `[1]|extend:[2, 3]`
 
-    - Lastly, `TagToken` is a secondary object used by the nodes above. It contains info about the original raw string, and the line / col where the string was found.
+    - Lastly, `Token` is a secondary object used by the nodes above. It contains info about the original raw string, and the line / col where the string was found.
 
 The final AST can look like this:
 
@@ -233,7 +234,7 @@ INPUT:
 AST:
 ```rs
 Tag {
-    name: TagToken {
+    name: Token {
         token: "my_tag".to_string(),
         start_index: 3,
         end_index: 9,
@@ -242,7 +243,7 @@ Tag {
     attrs: vec![TagAttr {
         key: None,
         value: TagValue {
-            token: TagToken {
+            token: Token {
                 token: "value".to_string(),
                 start_index: 10,
                 end_index: 15,
@@ -252,7 +253,7 @@ Tag {
             spread: None,
             filters: vec![TagValueFilter {
                 arg: None,
-                token: TagToken {
+                token: Token {
                     token: "lower".to_string(),
                     start_index: 16,
                     end_index: 21,
@@ -273,20 +274,18 @@ Tag {
         line_col: (1, 11),
     }],
     is_self_closing: false,
-    syntax: TagSyntax::Django,
     start_index: 0,
     end_index: 24,
     line_col: (1, 4),
 }
 ```
 
-
 ## On template tag compilation
 
 Another important part is the "tag compiler". This turns the parsed AST into an executable Python function. When this function is called with the `Context` object, it resolves the inputs to a tag into Python args and kwargs.
 
 ```py
-from djc_core import parse_tag, compile_tag
+from djc_core.template_parser import parse_tag, compile_tag
 
 ast = parse_tag('{% my_tag var1 ...[2, 3] key=val ...{"other": "x"} / %}')
 tag_fn = compile_tag(ast)

@@ -5,6 +5,10 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
+djc-safe-eval = { path = "../djc-safe-eval" }
+ruff_python_ast = { workspace = true }
+ruff_python_parser = { workspace = true }
+
 pyo3 = { workspace = true }
 quick-xml = { workspace = true }
 pest = { workspace = true }

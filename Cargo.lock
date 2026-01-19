@@ -365,12 +365,15 @@ dependencies = [
 name = "djc-template-parser"
 version = "1.0.0"
 dependencies = [
+ "djc-safe-eval",
  "lazy_static",
  "pest",
  "pest_derive",
  "pyo3",
  "quick-xml",
  "regex",
+ "ruff_python_ast",
+ "ruff_python_parser",
  "thiserror",
 ]
 

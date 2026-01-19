@@ -1,136 +1,60 @@
-use djc_html_transformer::{set_html_attributes as set_html_attributes_rust, HtmlTransformerConfig};
-use djc_template_parser::{
-    compile_ast_to_string as compile_ast_to_string_rust, parse_tag as parse_tag_rust, Tag, TagAttr,
-    TagSyntax, TagToken, TagValue, TagValueFilter, ValueKind,
-};
-use djc_safe_eval::safe_eval as safe_eval_rust;
-use pyo3::exceptions::{PySyntaxError, PyValueError};
+pub mod py_html_transformer;
+pub mod py_safe_eval;
+pub mod py_template_parser;
+
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyDict, PyTuple};
-use std::collections::HashSet;
+
+use djc_template_parser::{
+    Comment, EndTag, ForLoopTag, GenericTag, ParserConfig, Tag, TagAttr, TagConfig, TagMeta,
+    TagSectionSpec, TagSpec, TagValue, TagValueFilter, TagWithBodySpec, TemplateVersion, Token,
+    ValueChild, ValueKind,
+};
+
+use crate::py_html_transformer::set_html_attributes;
+use crate::py_safe_eval::safe_eval;
+use crate::py_template_parser::{compile_tag_attrs, compile_value, parse_tag};
 
 /// Singular Python API that brings togther all the other Rust crates.
+/// Each crate is exposed as a submodule.
 #[pymodule]
 fn djc_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // HTML transformer
-    m.add_function(wrap_pyfunction!(set_html_attributes, m)?)?;
+    let html_transformer = PyModule::new(m.py(), "html_transformer")?;
+    m.add_submodule(&html_transformer)?;
+    html_transformer.add_function(wrap_pyfunction!(set_html_attributes, &html_transformer)?)?;
 
     // Safe eval
-    m.add_function(wrap_pyfunction!(safe_eval, m)?)?;
+    let safe_eval_module = PyModule::new(m.py(), "safe_eval")?;
+    m.add_submodule(&safe_eval_module)?;
+    safe_eval_module.add_function(wrap_pyfunction!(safe_eval, &safe_eval_module)?)?;
 
     // Template parser
-    m.add_function(wrap_pyfunction!(parse_tag, m)?)?;
-    m.add_function(wrap_pyfunction!(compile_ast_to_string, m)?)?;
-    m.add_class::<Tag>()?;
-    m.add_class::<TagAttr>()?;
-    m.add_class::<TagSyntax>()?;
-    m.add_class::<TagToken>()?;
-    m.add_class::<TagValue>()?;
-    m.add_class::<TagValueFilter>()?;
-    m.add_class::<ValueKind>()?;
+    let template_parser = PyModule::new(m.py(), "template_parser")?;
+    m.add_submodule(&template_parser)?;
+    // Template parser - functions
+    template_parser.add_function(wrap_pyfunction!(compile_tag_attrs, &template_parser)?)?;
+    template_parser.add_function(wrap_pyfunction!(compile_value, &template_parser)?)?;
+    template_parser.add_function(wrap_pyfunction!(parse_tag, &template_parser)?)?;
+    // Template parser - AST API
+    template_parser.add_class::<Comment>()?;
+    template_parser.add_class::<EndTag>()?;
+    template_parser.add_class::<ForLoopTag>()?;
+    template_parser.add_class::<GenericTag>()?;
+    template_parser.add_class::<Tag>()?;
+    template_parser.add_class::<TagAttr>()?;
+    template_parser.add_class::<TagMeta>()?;
+    template_parser.add_class::<TagValue>()?;
+    template_parser.add_class::<TagValueFilter>()?;
+    template_parser.add_class::<TemplateVersion>()?;
+    template_parser.add_class::<Token>()?;
+    template_parser.add_class::<ValueChild>()?;
+    template_parser.add_class::<ValueKind>()?;
+    // Template parser - Config API
+    template_parser.add_class::<ParserConfig>()?;
+    template_parser.add_class::<TagConfig>()?;
+    template_parser.add_class::<TagSectionSpec>()?;
+    template_parser.add_class::<TagSpec>()?;
+    template_parser.add_class::<TagWithBodySpec>()?;
 
     Ok(())
-}
-
-#[pyfunction]
-#[pyo3(signature = (input, flags=None))]
-fn parse_tag(input: &str, flags: Option<HashSet<String>>) -> PyResult<Tag> {
-    parse_tag_rust(input, flags).map_err(|e| PySyntaxError::new_err(e.to_string()))
-}
-
-#[pyfunction]
-fn compile_ast_to_string(py: Python, attributes: &Bound<PyList>) -> PyResult<String> {
-    let attrs: Vec<TagAttr> = attributes.extract()?;
-    let result = py.detach(|| compile_ast_to_string_rust(&attrs));
-    result.map_err(|e| PySyntaxError::new_err(e.to_string()))
-}
-
-/// Transform HTML by adding attributes to the elements.
-///
-/// Args:
-///     html (str): The HTML string to transform. Can be a fragment or full document.
-///     root_attributes (List[str]): List of attribute names to add to root elements only.
-///     all_attributes (List[str]): List of attribute names to add to all elements.
-///     check_end_names (bool, optional): Whether to validate matching of end tags. Defaults to false.
-///     watch_on_attribute (str, optional): If set, captures which attributes were added to elements with this attribute.
-///
-/// Returns:
-///     Tuple[str, Dict[str, List[str]]]: A tuple containing:
-///         - The transformed HTML string
-///         - A dictionary mapping captured attribute values to lists of attributes that were added
-///           to those elements. Only returned if watch_on_attribute is set, otherwise empty dict.
-///
-/// Example:
-///     >>> html = '<div data-id="123"><p>Hello</p></div>'
-///     >>> html, captured = set_html_attributes(html, ['data-root-id'], ['data-v-123'], watch_on_attribute='data-id')
-///     >>> print(captured)
-///     {'123': ['data-root-id', 'data-v-123']}
-///
-/// Raises:
-///     ValueError: If the HTML is malformed or cannot be parsed.
-#[pyfunction]
-#[pyo3(signature = (html, root_attributes, all_attributes, check_end_names=None, watch_on_attribute=None))]
-#[pyo3(
-    text_signature = "(html, root_attributes, all_attributes, *, check_end_names=False, watch_on_attribute=None)"
-)]
-pub fn set_html_attributes(
-    py: Python,
-    html: &str,
-    root_attributes: Vec<String>,
-    all_attributes: Vec<String>,
-    check_end_names: Option<bool>,
-    watch_on_attribute: Option<String>,
-) -> PyResult<Py<PyAny>> {
-    let config = HtmlTransformerConfig::new(
-        root_attributes,
-        all_attributes,
-        check_end_names.unwrap_or(false),
-        watch_on_attribute,
-    );
-
-    match set_html_attributes_rust(html, &config) {
-        Ok((html, captured)) => {
-            // Convert captured attributes to a Python dictionary
-            let captured_dict = PyDict::new(py);
-            for (id, attrs) in captured {
-                captured_dict.set_item(id, attrs)?;
-            }
-
-            // Convert items to Bound<PyAny> for the tuple
-            use pyo3::types::PyString;
-            let html_obj = PyString::new(py, &html).as_any().clone();
-            let dict_obj = captured_dict.as_any().clone();
-            let result = PyTuple::new(py, vec![html_obj, dict_obj])?;
-            Ok(result.into_any().unbind())
-        }
-        Err(e) => Err(PyValueError::new_err(e.to_string())),
-    }
-}
-
-/// Transform a Python expression string to make it safe for evaluation.
-///
-/// This function takes a Python expression string and transforms it into safe code
-/// by wrapping potentially unsafe operations (like variable access, function calls,
-/// attribute access, etc.) with sandboxed function calls.
-///
-/// Args:
-///     source (str): The Python expression string to transform.
-///
-/// Returns:
-///     str: The transformed Python expression as a string.
-///
-/// Raises:
-///     SyntaxError: If the input is not valid Python syntax or contains forbidden constructs.
-///
-/// Example:
-///     >>> safe_eval("my_var + 1")
-///     'variable("my_var") + 1'
-///
-///     >>> safe_eval("lambda x: x + my_var")
-///     'lambda x: x + variable("my_var")'
-#[pyfunction]
-#[pyo3(signature = (source))]
-fn safe_eval(source: &str) -> PyResult<String> {
-    let result = safe_eval_rust(source).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    Ok(result)
 }
