@@ -36,6 +36,9 @@ jobs:
             target: ppc64le
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
