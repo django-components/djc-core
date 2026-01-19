@@ -94,7 +94,43 @@ jobs:
             target: x86
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      # Explicitly install all supported versions of Python on Windows.
+      # Otherwise, as of Jan 2026, if we installed only Python 3.14,
+      # then the Windows runner would NOT generate wheels for Python 3.8.
+      # See https://github.com/django-components/djc-core/issues/22
+      # And https://pypi.org/project/djc-core-html-parser/1.0.3/#files
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.9
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.9"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           architecture: ${{ matrix.platform.target }}
@@ -121,7 +157,43 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      # Explicitly install all supported versions of Python on macOS.
+      # Otherwise, as of Jan 2026, if we installed only Python 3.14,
+      # then the macOS runner would NOT generate wheels for Python 3.8, 3.9, 3.10.
+      # See https://github.com/django-components/djc-core/issues/22
+      # And https://pypi.org/project/djc-core/1.1.0/#files
+      #
+      # NOTE: Python 3.8 and 3.9 are not available on macOS ARM64 runners (macos-14 with 'aarch64' target)
+      # They were removed from the runner images, so we skip them on ARM64 to avoid build failures.
+      # They are still built on Intel macOS (macos-13 with x86_64).
+      - name: Setup Python 3.8
+        if: matrix.platform.target != 'aarch64'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"
+      - name: Setup Python 3.9
+        if: matrix.platform.target != 'aarch64'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.9"
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Build wheels
