@@ -1,6 +1,6 @@
 # Django Components Template Parser
 
-A high-performance Rust-based template parser for [`django-components`](https://github.com/django-components/django-components), designed to parse Django template syntax into an Abstract Syntax Tree (AST) and compile it into callable Python functions.
+A high-performance Rust-based template parser and compiler for [`django-components`](https://github.com/django-components/django-components), designed to parse Django template syntax into an Abstract Syntax Tree (AST) and compile it into callable Python functions.
 
 ## Overview
 
