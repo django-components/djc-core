@@ -278,6 +278,7 @@ class template_parser:
             tag: "template_parser.TagSpec",
             sections: Optional[List["template_parser.TagSectionSpec"]] = None,
         ) -> None: ...
+        def get_flags(self) -> Set[str]: ...  # Get the flags for this tag config
 
     class ParserConfig:
         """Parser config

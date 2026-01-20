@@ -20,6 +20,7 @@ from djc_core.template_parser import (
     TagAttr,
     TagConfig,
     TagSpec,
+    TagSectionSpec,
     TemplateVersion,
     Token,
     TagValue,
@@ -5072,6 +5073,84 @@ class TestFlags:
         ast = parse_tag(tag_content, config)
         assert ast.attrs[0].value.token.content == "my_flag"
         assert not ast.attrs[0].is_flag
+
+
+class TestTagConfigGetFlags:
+    def test_get_flags_plain_tag(self):
+        tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags={"flag1", "flag2"}),
+            sections=None,
+        )
+
+        flags = tag_config.get_flags()
+        assert flags == {"flag1", "flag2"}
+
+    def test_get_flags_tag_with_body(self):
+        tag_config = TagConfig(
+            tag=TagSpec("if", flags={"flag1", "flag2", "flag3"}),
+            sections=[
+                TagSectionSpec(
+                    tag=TagSpec("elif", flags={"section_flag"}),
+                    repeatable=True,
+                )
+            ],
+        )
+
+        flags = tag_config.get_flags()
+        assert flags == {"flag1", "flag2", "flag3"}
+
+    def test_get_flags_mutation_does_not_affect_original(self):
+        original_flags = {"flag1", "flag2"}
+        tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags=original_flags.copy()),
+            sections=None,
+        )
+
+        flags = tag_config.get_flags()
+        assert flags == {"flag1", "flag2"}
+
+        # Mutate the returned set
+        flags.add("flag3")
+        flags.discard("flag1")
+
+        # Verify the original TagConfig is NOT affected
+        flags_after_mutation = tag_config.get_flags()
+        assert flags_after_mutation == {"flag1", "flag2"}
+
+    def test_get_flags_mutation_does_not_affect_original_tag_with_body(self):
+        original_flags = {"flag1", "flag2", "flag3"}
+        tag_config = TagConfig(
+            tag=TagSpec("if", flags=original_flags.copy()),
+            sections=[
+                TagSectionSpec(
+                    tag=TagSpec("elif", flags={"section_flag"}),
+                    repeatable=True,
+                )
+            ],
+        )
+
+        # Get flags and verify initial state
+        flags = tag_config.get_flags()
+        assert flags == {"flag1", "flag2", "flag3"}
+
+        # Mutate the returned set
+        flags.add("flag4")
+        flags.clear()
+        flags.add("mutated_flag")
+
+        # Verify the original TagConfig is NOT affected
+        flags_after_mutation = tag_config.get_flags()
+        assert flags_after_mutation == {"flag1", "flag2", "flag3"}
+
+    def test_get_flags_empty_flags(self):
+        tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags=set()),
+            sections=None,
+        )
+
+        flags = tag_config.get_flags()
+        assert flags == set()
+        assert len(flags) == 0
 
 
 class TestSelfClosing:

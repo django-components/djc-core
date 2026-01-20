@@ -119,6 +119,13 @@ impl TagConfig {
             None => Self::PlainTag(tag),
         }
     }
+
+    pub fn get_flags(&self) -> &HashSet<String> {
+        match self {
+            TagConfig::PlainTag(tag) => &tag.flags,
+            TagConfig::TagWithBody(tag_with_body) => &tag_with_body.tag.flags,
+        }
+    }
 }
 
 /// Parser config
