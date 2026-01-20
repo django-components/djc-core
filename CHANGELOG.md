@@ -1,5 +1,9 @@
 # Release notes
 
+## v1.2.0
+
+- Added template parsing and compiling with `parse_tag()` and `compile_tag()`
+
 ## v1.1.1
 
 - Add pre-built wheels for:
