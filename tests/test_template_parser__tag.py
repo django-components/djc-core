@@ -8,7 +8,7 @@ Source of truth is djc_core_template_parser.
 
 # ruff: noqa: ANN201,ARG005,S101,S105,S106,E501
 import re
-from typing import Any, List
+from typing import Any, List, Optional, Union
 from unittest.mock import Mock
 
 import pytest
@@ -60,7 +60,7 @@ def variable_resolver(ctx, src, token, filters, tags, var):
 ###############################
 
 
-def _simple_compile_tag(tag_or_attrs: GenericTag | List[TagAttr], source: str):
+def _simple_compile_tag(tag_or_attrs: Union[GenericTag, List[TagAttr]], source: str):
     return compile_tag(
         tag_or_attrs,
         source,
@@ -90,7 +90,7 @@ def token(content: str, start_index: int, line: int, col: int) -> Token:
 # Takes key (optional), value, and is_flag
 # Calculates the token field internally from key token + "=" + value token
 # If key is None, the token is just the value token
-def tag_attr(key: Token | None, value: TagValue, is_flag: bool) -> TagAttr:
+def tag_attr(key: Optional[Token], value: TagValue, is_flag: bool) -> TagAttr:
     if key is not None:
         # Calculate token content: key + "=" + value.token.content
         token_content = f"{key.content}={value.token.content}"
@@ -119,7 +119,7 @@ def plain_string_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -150,7 +150,7 @@ def plain_int_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -181,7 +181,7 @@ def plain_float_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -212,7 +212,7 @@ def plain_translation_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -245,7 +245,7 @@ def plain_variable_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -280,7 +280,7 @@ def plain_variable_value(
 def string_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -302,7 +302,7 @@ def string_value(
 def int_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -325,7 +325,7 @@ def int_value(
 def variable_value(
     full_token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -356,7 +356,7 @@ def variable_value(
 def float_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -378,7 +378,7 @@ def float_value(
 def translation_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -403,7 +403,7 @@ def plain_template_string_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -431,7 +431,7 @@ def plain_template_string_value(
 def template_string_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
@@ -456,7 +456,7 @@ def plain_python_expr_value(
     start_index: int,
     line: int,
     col: int,
-    spread: str | None = None,
+    spread: Optional[str] = None,
 ) -> TagValue:
     if spread is not None:
         token_content = f"{spread}{content}"
@@ -484,7 +484,7 @@ def plain_python_expr_value(
 def python_expr_value(
     token: Token,
     value: Token,
-    spread: str | None,
+    spread: Optional[str],
     filters: List[TagValueFilter],
     used_variables: List[Token],
     assigned_variables: List[Token],
