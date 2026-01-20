@@ -210,3 +210,151 @@ To publish a new version of the package, you need to:
 1. Bump the version in `pyproject.toml` and `Cargo.toml`
 2. Open a PR and merge it to `main`.
 3. Create a new tag on the `main` branch with the new version number (e.g. `1.0.0`), or create a new release in the GitHub UI.
+
+## Creating new crates
+
+### 1. Create Rust-side code
+
+Each new package should be a Rust crate, meaning that other Rust crates should be
+able to import from it. Thus, we start by defing a regular Rust package:
+
+1. Define new crate inside `crates`, e.g. `djc-new-package`, and give it `Cargo.toml` (`crates/djc-new-package/Cargo.toml`)
+2. Add the new crate to top-level [`Cargo.toml`](./Cargo.toml).
+3. If the new crate needs new 3rd party dependencies, add them to the top-level [`Cargo.toml`](./Cargo.toml).
+
+   Then, inside the `djc-new-package/Cargo.toml`, link to those dependencies as `pyo3 = { workspace = true }`.
+4. Define the Rust-side public API for this new crate in `lib.rs` (`crates/djc-new-package/src/lib.rs`)
+5. Write Rust test for the Rust-side API in `djc-new-package/tests/` directory.
+6. Lastly, write package-level README in `djc-new-package/README,md`
+
+### 2. Expose Rust code to Python
+
+Once we know that the code works, expose the Rust code to Python. All Rust crates
+are exposed through a single Rust crate, `djc-core`.
+
+Bringing all the crates together minimizes the overhead. A single Rust-to-Python binary
+can have ~100 MB, because it contains the Rust binary, and other things. Thus, instead of
+having 5x 100 MB binaries, we put them all together to end up with only a single 100 MB binary.
+
+1. Create `py_new_package.rs` file in `crates/djc-core/src`. Put here any code needed to help with
+   converting Rust API to Python API (e.g. Rust exceptions to Python exceptions).
+2. Define the actual Python API of the new package in `crates/djc-core/src/lib.rs`.
+
+   Create its own Python module for this new crate to avoid name conflicts, e.g.<br/>
+   `let new_package = PyModule::new(m.py(), "new_package")?;`
+
+   Then add the symbols (methods, classes, variables) that the module should expose.
+
+When you then run `maturin dev`, a `djc_core` binary file will be created inside
+the `djc_core/` Python project.
+
+Your new Rust API will be available in Python as:
+
+```py
+from djc_core.djc_core.new_package import some_func
+
+some_func(...)
+```
+
+### 3. Define Python-side code
+
+By default, when you create Python bindings for Rust using `maturin` and you don't
+define any Python code, `maturin` will generate it for you. What this auto-generated Python code
+does is that it re-exports the API that was exposed from Rust to Python, but this time it's re-exported
+as Python *package* API.
+
+However, sometimes we need to modify the Python public API from what maturin/PyO3 generated:
+- For some functionalities we need the Python runtime, like when calling `exec()` on generated code.
+- If a Rust function returns a union, you will want to wrap that function in Python function,
+  and unwrap the union.
+
+Because of the cases like these, we take ownership of the Python API, and define/update it manually.
+
+So it's important to remember that the binary that `maturin` creates is NOT a python package itself.
+It's only a Python *module*, that you can then re-export as a Python *package*:
+
+```txt
+,-----------,
+| Rust code |
+|___________|
+     ||
+     \/
+,----------------------,
+| Compiled Rust binary |
+|  (as Python module)  |
+|______________________|
+     ||
+     \/
+,----------------,
+| Python package |
+|________________|
+```
+
+The implication is that the final Python package can contain also OTHER code, than just
+what was exposed from Rust.
+
+Here is how we handle that for new packages:
+
+1. Extract the virtual module that scopes the Rust-to-Python API of the new package.
+
+   Head over to [`djc_core/rust.py`](./djc_core/rust.py) and add entry for the new package:
+
+   ```py
+   from djc_core import djc_core
+
+   template_parser = djc_core.template_parser
+   new_package = djc_core.new_package
+   ```
+
+   We do this to resolve issue with pytest and how it handles virtual modules.
+
+   We need to do this because `djc_core.new_package` is a virtual module that exists only
+   inside the Rust-to-Python binary. It doesn't exist as an actual file called `new_package.py`.
+
+   See [`djc_core/rust.py`](./djc_core/rust.py) for more details.
+
+2. Add typing for the new Rust-to-Python package and all its members in [`djc_core/rust.pyi`](./djc_core/rust.pyi):
+
+   There create a new class with the same name as the submodule of thenew package.
+
+   Inside it, add signatures and docstrings for all the functions/variables that were
+   exposed from Rust to Python.
+
+   See [`djc_core/rust.pyi`](./djc_core/rust.pyi) for more details.
+
+   ```py
+   class new_package:
+      class Comment:
+          """Represents a Django template comment `{# ... #}` or `{% comment %}...{% endcomment %}`"""
+          def __init__(self, token: template_parser.Token, value: template_parser.Token) -> None: ...
+          token: template_parser.Token  # Entire comment span including delimiters
+          value: template_parser.Token  # Comment text without delimiters
+   ```
+
+3. Define Python-side code for the new package under `djc_core/new_package`.
+
+   If your code needs to call the code exposed from Rust, you can import it from [`djc_core/rust.py`](./djc_core/rust.py).
+   
+   Imports from `rust.pyi` will be properly typed thanks to `rust.pyi` that we've defined.
+
+   ```py
+   from djc_core.rust import new_package
+
+   new_package.some_func(123)
+   ```
+
+4. Define the new Python-side API. Add `__init__.py` to `djc_core/new_package`,
+   and re-export everything that should be public. See [`template_parser/__init__.py`](./djc_core/template_parser/__init__.py)
+
+   When the `djc_core` package is published, we will use the package-specific API by importing
+   from this submodule directly, like so:
+
+   ```py
+   from djc_core.new_package import some_func
+
+   some_func(123)
+   ```
+
+5. Add Python-side tests for the new Python-side API in `tests/test_new_package.py`.
+
+6. Lastly, update the top-level `README.md`, describing what the new package does.
