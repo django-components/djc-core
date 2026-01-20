@@ -65,7 +65,7 @@ docs/_build/
 target/
 
 # VSCode
-.vscode
+# .vscode
 
 # Poetry
 # lock file is not needed for development

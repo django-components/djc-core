@@ -25,7 +25,7 @@ It works by:
 This package is split in 2 parts:
 
 - The Rust code defined here
-- Python code defined in [`djc_core/djc_safe_eval`](../../djc_core/djc_safe_eval/)
+- Python code defined in [`djc_core/safe_eval`](../../djc_core/safe_eval/)
 
 The expression parsing is done in Rust so that this module can be used directly
 by the djc template parser and linter. This module not only sandboxes the Python
@@ -40,7 +40,7 @@ expression, but also collects metadata for the linter about:
 ### Basic usage
 
 ```python
-from djc_core import safe_eval
+from djc_core.safe_eval import safe_eval
 
 # Compile an expression
 compiled = safe_eval("my_var + 1")
@@ -53,7 +53,7 @@ print(result)  # 6
 ### More examples
 
 ```python
-from djc_core import safe_eval
+from djc_core.safe_eval import safe_eval
 
 # Conditionals
 compiled = safe_eval(
@@ -148,7 +148,7 @@ Use the `@unsafe` decorator to mark functions as unsafe in expressions.
 This is compatible with Jinja's `@unsafe` decorator.
 
 ```py
-from djc_core import safe_eval, unsafe
+from djc_core.safe_eval import safe_eval, unsafe
 
 @unsafe
 def dump_all_passwords():
@@ -177,7 +177,7 @@ Return `False` to indicate that the value is NOT safe.
 | `validate_assign`    | `(var_name: str, value: Any) -> bool` |
 
 ```python
-from djc_core import safe_eval, SecurityError
+from djc_core.safe_eval import safe_eval, SecurityError
 
 # Example 1: Custom variable validator
 def validate_var(name: str) -> bool:
@@ -217,7 +217,7 @@ result = compiled({"obj": MyObject()})
 When an expression raises an error, the error message includes the position in the expression where the error happened:
 
 ```python
-from djc_core import safe_eval
+from djc_core.safe_eval import safe_eval
 
 compiled = safe_eval("my_var + undefined_var")
 result = compiled({"my_var": 5})

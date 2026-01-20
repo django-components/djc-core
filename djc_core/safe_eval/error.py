@@ -123,7 +123,7 @@ def _format_error_with_context(
     # Update exception message
     error.args = ("\n".join(error_lines),)
     # Mark that this error has been processed by error_context
-    error._safe_eval_error_processed = True  # type: ignore[attr-defined]
+    error._error_processed = True  # type: ignore[attr-defined]
 
 
 def error_context(func_name: str) -> Callable[[T], T]:

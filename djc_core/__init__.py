@@ -1,16 +1,21 @@
-# This file is what maturin auto-generates. But it seems maturin omits it when we have a __init__.pyi file.
-# So we have to manually include it here.
-# Following block of code is what maturin would've generated
-
-from .djc_core import *
-
-__doc__ = djc_core.__doc__
-if hasattr(djc_core, "__all__"):
-    __all__ = djc_core.__all__
-
-# OVERRIDES START HERE
-# Add here any additional public API that we defined purely in Python
-from djc_core.djc_safe_eval import safe_eval, unsafe, SecurityError
-
-if hasattr(djc_core, "__all__"):
-    __all__ += ["safe_eval", "unsafe", "SecurityError"]
+# NOTE:
+# By default, maturin auto-generates this file.
+#
+# However, due to the complexity of the project:
+# - having multiple crates
+# - Python-side code for some crates (like template parser or safe eval)
+# - And splitting the Python API into submodules (html_transformer, template_parser, safe_eval)
+#
+# Instead, we manually manage the Python-side API for each crate.
+#
+# ---
+#
+# The compiled Rust code is accessible as Python module `djc_core.djc_core`.
+#
+# But for the Python-side public API, each crate has its own directory with `__init__.py`` file.
+#
+# Thus, to import from any crate, you do e.g.
+# ```python
+# from djc_core.html_transformer import set_html_attributes
+# ```
+#

@@ -1,9 +1,9 @@
-use transformer::{transform};
+use transformer::transform;
 
 pub mod transformer;
 
 // Re-export the types that users need
-pub use transformer::{HtmlTransformerConfig};
+pub use transformer::HtmlTransformerConfig;
 
 /// Transform HTML by adding attributes to the elements.
 ///

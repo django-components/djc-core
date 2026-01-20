@@ -3,6 +3,7 @@ members = [
     "crates/djc-core",
     "crates/djc-html-transformer",
     "crates/djc-safe-eval",
+    "crates/djc-template-parser",
 ]
 resolver = "2"
 
@@ -18,6 +19,11 @@ repository = "https://github.com/django-components/djc-core"
 [workspace.dependencies]
 pyo3 = { version = "0.27.1", features = ["extension-module"] }
 quick-xml = "0.38.3"
+pest = "2.8.3"
+pest_derive = "2.8.3"
+thiserror = "2.0.17"
+regex = "1.12.2"
+lazy_static = "1.5.0"
 
 # Ruff dependencies
 ruff_annotate_snippets = { path = "crates/djc-safe-eval/submodules/ruff/crates/ruff_annotate_snippets" }
@@ -66,13 +72,11 @@ salsa = { git = "https://github.com/salsa-rs/salsa.git", rev = "29ab321b45d00daa
 ] }
 schemars = { version = "0.8.16" }
 serde = { version = "1.0.197", features = ["derive"] }
-thiserror = { version = "2.0.17" }
 
 # Used by ruff_cache
 filetime = { version = "0.2.23" }
 glob = { version = "0.3.1" }
 globset = { version = "0.4.14" }
-regex = { version = "1.12.2" }
 seahash = { version = "4.1.0" }
 
 # Used by ruff_macros

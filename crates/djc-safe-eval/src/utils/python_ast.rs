@@ -1,8 +1,8 @@
 use ruff_python_ast::name::Name;
 use ruff_python_ast::{
-    Arguments, Expr, ExprAttribute, ExprCall, ExprContext, ExprName, ExprNoneLiteral, ExprNumberLiteral, Keyword,
-    ExprStringLiteral, ExprTuple, Identifier, StringLiteral, StringLiteralFlags,
-    StringLiteralValue,
+    Arguments, Expr, ExprAttribute, ExprCall, ExprContext, ExprName, ExprNoneLiteral,
+    ExprNumberLiteral, ExprStringLiteral, ExprTuple, Identifier, Keyword, StringLiteral,
+    StringLiteralFlags, StringLiteralValue,
 };
 use ruff_text_size::TextRange;
 
@@ -91,22 +91,20 @@ pub fn interceptor_call(
         variable_name("context", range),
         variable_name("source", range),
         // Create tuple: (start_index_int, end_index_int)
-        tuple_literal(vec![
-            number_literal(range.start().to_usize(), range),
-            number_literal(range.end().to_usize(), range),
-        ], range),
+        tuple_literal(
+            vec![
+                number_literal(range.start().to_usize(), range),
+                number_literal(range.end().to_usize(), range),
+            ],
+            range,
+        ),
     ];
 
     // Followed by the rest of the arguments
     all_args.extend(args);
 
     // E.g. `call(context, source, (start_index, end_index), fn, *args, **kwargs)`
-    call(
-        variable_name(func_name, range),
-        all_args,
-        keywords,
-        range
-    )
+    call(variable_name(func_name, range), all_args, keywords, range)
 }
 
 /// Helper to extract the TextRange from an Expr.

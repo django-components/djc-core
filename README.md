@@ -19,7 +19,7 @@ Re-implementation of Jinja2's sandboxed evaluation logic, built in Rust using th
 **Usage**
 
 ```python
-from djc_core import safe_eval
+from djc_core.safe_eval import safe_eval
 
 # Compile an expression
 compiled = safe_eval("my_var + 1")
@@ -89,7 +89,7 @@ This implementation was found to be 40-50x faster than our Python implementation
 **Usage**
 
 ```python
-from djc_core import set_html_attributes
+from djc_core.html_transformer import set_html_attributes
 
 html = '<div><p>Hello</p></div>'
 result, _ = set_html_attributes(
@@ -113,7 +113,7 @@ Then, during the HTML transformation, we check each element for this attribute. 
 2. Record the attributes that were added to the element, using the value of the watched attribute as the key.
 
 ```python
-from djc_core import set_html_attributes
+from djc_core.html_transformer import set_html_attributes
 
 html = """
   <div data-watch-id="123">
