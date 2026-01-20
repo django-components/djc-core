@@ -5153,6 +5153,71 @@ class TestTagConfigGetFlags:
         assert len(flags) == 0
 
 
+class TestParserConfigGetTag:
+    def test_get_tag_plain_tag(self):
+        config = ParserConfig(version=TemplateVersion.v1)
+        tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags={"flag1", "flag2"}),
+            sections=None,
+        )
+        config.set_tag(tag_config)
+
+        retrieved = config.get_tag("my_tag")
+        assert retrieved is not None
+        assert retrieved.get_flags() == {"flag1", "flag2"}
+
+    def test_get_tag_tag_with_body(self):
+        config = ParserConfig(version=TemplateVersion.v1)
+        tag_config = TagConfig(
+            tag=TagSpec("if", flags={"flag1", "flag2", "flag3"}),
+            sections=[
+                TagSectionSpec(
+                    tag=TagSpec("elif", flags={"section_flag"}),
+                    repeatable=True,
+                )
+            ],
+        )
+        config.set_tag(tag_config)
+
+        retrieved = config.get_tag("if")
+        assert retrieved is not None
+        assert retrieved.get_flags() == {"flag1", "flag2", "flag3"}
+
+    def test_get_tag_not_found(self):
+        config = ParserConfig(version=TemplateVersion.v1)
+        tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags={"flag1"}),
+            sections=None,
+        )
+        config.set_tag(tag_config)
+
+        retrieved = config.get_tag("nonexistent")
+        assert retrieved is None
+
+    def test_get_tag_mutation_does_not_affect_original(self):
+        config = ParserConfig(version=TemplateVersion.v1)
+        original_tag_config = TagConfig(
+            tag=TagSpec("my_tag", flags={"flag1", "flag2"}),
+            sections=None,
+        )
+        config.set_tag(original_tag_config)
+
+        # Get the tag config
+        retrieved = config.get_tag("my_tag")
+        assert retrieved is not None
+        assert retrieved.get_flags() == {"flag1", "flag2"}
+
+        # Mutate the retrieved TagConfig's flags
+        retrieved_flags = retrieved.get_flags()
+        retrieved_flags.add("flag3")
+        retrieved_flags.discard("flag1")
+
+        # Verify the original config is NOT affected
+        retrieved_again = config.get_tag("my_tag")
+        assert retrieved_again is not None
+        assert retrieved_again.get_flags() == {"flag1", "flag2"}
+
+
 class TestSelfClosing:
     def test_self_closing_simple(self):
         ast = parse_tag("{% my_tag / %}")

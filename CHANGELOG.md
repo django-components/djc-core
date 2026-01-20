@@ -1,5 +1,10 @@
 # Release notes
 
+## v1.2.2
+
+- Add `get_tag()` method to `ParserConfig` to retrieve tag configurations
+- Remove `ParserConfig.tags` attribute (use `get_tag()` instead)
+
 ## v1.2.1
 
 - Allow to get allowed flags from `TagConfig`
