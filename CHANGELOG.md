@@ -1,5 +1,9 @@
 # Release notes
 
+## v1.2.1
+
+- Allow to get allowed flags from `TagConfig`
+
 ## v1.2.0
 
 - Added template parsing and compiling with `parse_tag()` and `compile_tag()`
