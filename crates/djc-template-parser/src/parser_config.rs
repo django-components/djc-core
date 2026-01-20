@@ -155,6 +155,11 @@ impl ParserConfig {
         let tag_name = tag_config.tag_name().to_string();
         self.tags.insert(tag_name, tag_config);
     }
+
+    /// Get config for a tag
+    pub fn get_tag(&self, tag_name: &str) -> Option<TagConfig> {
+        self.tags.get(tag_name).cloned()
+    }
 }
 
 impl ParserConfig {
@@ -220,9 +225,7 @@ impl ParserConfig {
 
         // Check that "for" is not specified, as it's a reserved special tag
         if self.tags.contains_key("for") {
-            return Err(
-                "Tag 'for' is reserved and cannot be specified in tag config".to_string(),
-            );
+            return Err("Tag 'for' is reserved and cannot be specified in tag config".to_string());
         }
 
         Ok(flags_map)

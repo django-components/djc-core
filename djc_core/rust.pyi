@@ -287,8 +287,10 @@ class template_parser:
         It can be constructed from Python or Rust.
         """
         def __init__(self, version: "template_parser.TemplateVersion") -> None: ...
-        tags: dict[str, "template_parser.TagConfig"]  # Map from tag name to TagConfig
         version: "template_parser.TemplateVersion"  # Template version
         def set_tag(
             self, tag_config: "template_parser.TagConfig"
         ) -> None: ...  # Set config for a tag
+        def get_tag(
+            self, tag_name: str
+        ) -> Optional["template_parser.TagConfig"]: ...  # Get config for a tag
