@@ -1,5 +1,23 @@
 # Release notes
 
+## v1.3.0
+
+Drop support for Python 3.8 and 3.9.
+
+### Feat
+
+- Allow multiline quoted strings:
+
+    ```django
+    {% component "ListItem"
+        attrs:class="
+            {{ module_classes }}
+            project-nav--item
+            w-full mt-0 shadow
+        "
+    / %}
+    ```
+
 ## v1.2.2
 
 - Add `get_tag()` method to `ParserConfig` to retrieve tag configurations

@@ -1,7 +1,7 @@
 /// Python interface for the djc_html_transformer crate.
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyString, PyTuple};
+use pyo3::types::{PyDict, PyString, PyTuple};
 
 use djc_html_transformer::{
     HtmlTransformerConfig, set_html_attributes as set_html_attributes_rust,
@@ -42,7 +42,7 @@ pub fn set_html_attributes(
     all_attributes: Vec<String>,
     check_end_names: Option<bool>,
     watch_on_attribute: Option<String>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<Py<PyTuple>> {
     let config = HtmlTransformerConfig::new(
         root_attributes,
         all_attributes,
@@ -59,10 +59,10 @@ pub fn set_html_attributes(
             }
 
             // Convert items to Bound<PyAny> for the tuple
-            let html_obj = PyString::new(py, &html).as_any().clone();
-            let dict_obj = captured_dict.as_any().clone();
+            let html_obj = PyString::new(py, &html).into_any();
+            let dict_obj = captured_dict.into_any();
             let result = PyTuple::new(py, vec![html_obj, dict_obj])?;
-            Ok(result.into_any().unbind())
+            Ok(result.unbind())
         }
         Err(e) => Err(PyValueError::new_err(e.to_string())),
     }

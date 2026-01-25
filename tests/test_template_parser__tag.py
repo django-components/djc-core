@@ -4728,6 +4728,51 @@ class TestTemplateString:
         assert args == ["default(None, TEMPLATE_RESOLVED:{% lorem w 4 %})"]
         assert kwargs == []
 
+    def test_multiline_quoted_string(self):
+        """See https://github.com/django-components/django-components/issues/1255"""
+        tag_content = """{% component "ListItem"
+    attrs:class="
+        {{ module_classes }}
+        project-nav--item
+        w-full mt-0 shadow
+    "
+/ %}"""
+        tag = parse_tag(tag_content)
+
+        # Verify the tag was parsed correctly
+        assert tag.meta.name.content == "component"
+        assert tag.is_self_closing is True
+        assert len(tag.attrs) == 2
+
+        # First attr should be the string "ListItem"
+        assert tag.attrs[0].key is None
+        assert tag.attrs[0].value.kind == ValueKind("string")
+        assert tag.attrs[0].value.token.content == '"ListItem"'
+
+        # Second attr should be attrs:class with multiline template string
+        assert tag.attrs[1].key is not None
+        assert tag.attrs[1].key.content == "attrs:class"
+        assert tag.attrs[1].value.kind == ValueKind("template_string")
+
+        # Verify the multiline template string contains the expected content
+        template_string_content = tag.attrs[1].value.token.content
+        assert "{{ module_classes }}" in template_string_content
+        assert "project-nav--item" in template_string_content
+        assert "w-full mt-0 shadow" in template_string_content
+
+        # Test compilation
+        tag_func = _simple_compile_tag(tag, tag_content)
+        args, kwargs = tag_func({"module_classes": "test-class"})
+
+        assert args == ["ListItem"]
+        assert len(kwargs) == 1
+        assert kwargs[0][0] == "attrs:class"
+        # The value should be resolved via template_string resolver
+        assert (
+            kwargs[0][1]
+            == "TEMPLATE_RESOLVED:\n            {{ module_classes }}\n            project-nav--item\n            w-full mt-0 shadow\n        "
+        )
+
 
 class TestComments:
     def test_comments(self):

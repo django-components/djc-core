@@ -168,9 +168,9 @@ mod tests {
 
         let input = "<div><p>Hello</p></div>";
         let (result, _) = transform(&config, input).unwrap();
+        let expected = "<div data-root=\"\" data-all=\"\"><p data-all=\"\">Hello</p></div>";
 
-        assert!(result.contains("data-root"));
-        assert!(result.contains("data-all"));
+        assert_eq!(result, expected);
     }
 
     #[test]

@@ -30,7 +30,7 @@ The parser supports:
 ### Prerequisites
 
 - Rust (latest stable version)
-- Python 3.8+
+- Python 3.10+
 - [Maturin](https://github.com/PyO3/maturin) for building Python extensions
 
 ### Setup
@@ -38,12 +38,12 @@ The parser supports:
 1. Install Maturin:
 
    ```bash
-   pip install maturin
+   uv sync --group dev
    ```
 
 2. Build and install the package in development mode:
    ```bash
-   maturin develop
+   uv run maturin develop
    ```
 
 This will compile the Rust code and install the Python package in your current environment.
@@ -58,7 +58,7 @@ cargo test
 cargo test tag_parser::tests::test_list_spread_comments
 
 # Run Python tests
-python -m pytest tests/
+uv run pytest tests/
 ```
 
 ## Developing django-components
@@ -71,13 +71,13 @@ To do that, you need to build the parser package and install it in your local fo
 
    ```bash
    cd djc_core_template_parser
-   maturin develop
+   uv run maturin develop
    ```
 
 2. Install `djc_core_template_parser` in django-components:
    ```bash
    cd ../django_components
-   pip install -e ../djc_core_template_parser
+   uv pip install -e ../djc_core_template_parser
    ```
 
 ## Publishing
@@ -139,7 +139,7 @@ The parser uses Pest's declarative grammar to define Django template syntax rule
 2. Update the grammar in `grammar.pest` if needed
 3. Update both `__init__.pyi` files if the interface changes
 4. Add tests to both test files if needed
-5. Run `maturin develop` to test your changes
+5. Run `uv run maturin develop` to test your changes
 6. Ensure all tests pass before submitting a PR
 
 ## On template tag parser

@@ -58,7 +58,7 @@ mod tests {
     fn test_compile_tag_attrs_single_arg() {
         assert_compile_tag_attrs(
             "{% my_tag my_var / %}",
-            "def compiled_func(context):\n    args = []\n    kwargs = []\n    args.append(variable(context, source, (10, 16), filters, tags, 'my_var'))\n    return args, kwargs"
+            "def compiled_func(context):\n    args = []\n    kwargs = []\n    args.append(variable(context, source, (10, 16), filters, tags, \"\"\"my_var\"\"\"))\n    return args, kwargs"
         );
     }
 
@@ -69,7 +69,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(variable(context, source, (10, 16), filters, tags, 'my_var'))
+    args.append(variable(context, source, (10, 16), filters, tags, """my_var"""))
     args.append('hello')
     args.append(123)
     return args, kwargs"#,
@@ -83,7 +83,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    kwargs.append(('key', variable(context, source, (14, 20), filters, tags, 'my_var')))
+    kwargs.append(('key', variable(context, source, (14, 20), filters, tags, """my_var""")))
     return args, kwargs"#,
         );
     }
@@ -95,7 +95,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    kwargs.append(('key1', variable(context, source, (15, 21), filters, tags, 'my_var')))
+    kwargs.append(('key1', variable(context, source, (15, 21), filters, tags, """my_var""")))
     kwargs.append(('key2', 'hello'))
     return args, kwargs"#,
         );
@@ -122,7 +122,7 @@ mod tests {
     args = []
     kwargs = []
     kwarg_seen = False
-    kwarg_seen = _handle_spread(variable(context, source, (10, 20), filters, tags, 'options'), """options""", args, kwargs, kwarg_seen)
+    kwarg_seen = _handle_spread(variable(context, source, (10, 20), filters, tags, """options"""), """options""", args, kwargs, kwarg_seen)
     kwargs.append(('key', 'value'))
     kwarg_seen = True
     return args, kwargs"#,
@@ -138,7 +138,7 @@ mod tests {
     kwargs = []
     kwargs.append(('key1', 'value1'))
     kwarg_seen = True
-    kwarg_seen = _handle_spread(variable(context, source, (24, 34), filters, tags, 'options'), """options""", args, kwargs, kwarg_seen)
+    kwarg_seen = _handle_spread(variable(context, source, (24, 34), filters, tags, """options"""), """options""", args, kwargs, kwarg_seen)
     kwargs.append(('key2', 'value2'))
     return args, kwargs"#,
         );
@@ -151,7 +151,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(template_string(context, source, (10, 24), filters, tags, "{{ my_var }}"))
+    args.append(template_string(context, source, (10, 24), filters, tags, """{{ my_var }}"""))
     return args, kwargs"#,
         );
     }
@@ -163,7 +163,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(translation(context, source, (10, 26), filters, tags, 'hello world'))
+    args.append(translation(context, source, (10, 26), filters, tags, """hello world"""))
     return args, kwargs"#,
         );
     }
@@ -175,7 +175,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(filter(context, source, (16, 22), filters, tags, 'upper', variable(context, source, (10, 22), filters, tags, 'my_var'), None))
+    args.append(filter(context, source, (16, 22), filters, tags, 'upper', variable(context, source, (10, 22), filters, tags, """my_var"""), None))
     return args, kwargs"#,
         );
     }
@@ -187,7 +187,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(filter(context, source, (16, 31), filters, tags, 'default', variable(context, source, (10, 31), filters, tags, 'my_var'), 'none'))
+    args.append(filter(context, source, (16, 31), filters, tags, 'default', variable(context, source, (10, 31), filters, tags, """my_var"""), 'none'))
     return args, kwargs"#,
         );
     }
@@ -199,7 +199,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append(filter(context, source, (22, 37), filters, tags, 'default', filter(context, source, (16, 22), filters, tags, 'upper', variable(context, source, (10, 37), filters, tags, 'my_var'), None), 'none'))
+    args.append(filter(context, source, (22, 37), filters, tags, 'default', filter(context, source, (16, 22), filters, tags, 'upper', variable(context, source, (10, 37), filters, tags, """my_var"""), None), 'none'))
     return args, kwargs"#,
         );
     }
@@ -211,7 +211,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append([1, variable(context, source, (14, 20), filters, tags, 'my_var')])
+    args.append([1, variable(context, source, (14, 20), filters, tags, """my_var""")])
     return args, kwargs"#,
         );
     }
@@ -223,7 +223,7 @@ mod tests {
             r#"def compiled_func(context):
     args = []
     kwargs = []
-    args.append({'key': variable(context, source, (18, 24), filters, tags, 'my_var')})
+    args.append({'key': variable(context, source, (18, 24), filters, tags, """my_var""")})
     return args, kwargs"#,
         );
     }
@@ -237,9 +237,9 @@ mod tests {
     kwargs = []
     kwargs.append(('key1', 'value1'))
     kwarg_seen = True
-    kwarg_seen = _handle_spread(variable(context, source, (24, 35), filters, tags, 'options1'), """options1""", args, kwargs, kwarg_seen)
+    kwarg_seen = _handle_spread(variable(context, source, (24, 35), filters, tags, """options1"""), """options1""", args, kwargs, kwarg_seen)
     kwargs.append(('key2', 'value2'))
-    kwarg_seen = _handle_spread(variable(context, source, (50, 61), filters, tags, 'options2'), """options2""", args, kwargs, kwarg_seen)
+    kwarg_seen = _handle_spread(variable(context, source, (50, 61), filters, tags, """options2"""), """options2""", args, kwargs, kwarg_seen)
     return args, kwargs"#,
         );
     }
@@ -263,6 +263,54 @@ mod tests {
             "{% my_tag (items + 1) / %}",
             "def compiled_func(context):\n    args = []\n    kwargs = []\n    args.append(expr(context, source, (10, 21), filters, tags, \"\"\"(items + 1)\"\"\"))\n    return args, kwargs"
         );
+    }
+
+    #[test]
+    fn test_multiline_template_string() {
+        // Test multiline template string (contains {{ }}) - should use triple quotes
+        let input = r#"{% my_tag key="{{ var1 }}
+    line 2
+    line 3" / %}"#;
+        let (tag, _) = plain_parse_tag_v1(input).unwrap();
+        let attrs = &tag.as_generic().unwrap().attrs;
+        let result = compile_tag_attrs(attrs).unwrap();
+
+        // Verify it uses triple quotes and contains the multiline content
+        assert!(result.contains("template_string"));
+        assert!(result.contains("\"\"\""));
+        assert!(result.contains("{{ var1 }}"));
+        assert!(result.contains("line 2"));
+        assert!(result.contains("line 3"));
+    }
+
+    #[test]
+    fn test_multiline_variable() {
+        // Test multiline variable value - should use triple quotes
+        let input = r#"{% my_tag key=my_var / %}"#;
+        let (tag, _) = plain_parse_tag_v1(input).unwrap();
+        let attrs = &tag.as_generic().unwrap().attrs;
+        let result = compile_tag_attrs(attrs).unwrap();
+
+        // Verify it uses triple quotes
+        assert!(result.contains("variable"));
+        assert!(result.contains("\"\"\""));
+        assert!(result.contains("my_var"));
+    }
+
+    #[test]
+    fn test_multiline_translation() {
+        // Test multiline translation - should use triple quotes
+        let input = r#"{% my_tag key=_('hello
+world') / %}"#;
+        let (tag, _) = plain_parse_tag_v1(input).unwrap();
+        let attrs = &tag.as_generic().unwrap().attrs;
+        let result = compile_tag_attrs(attrs).unwrap();
+
+        // Verify it uses triple quotes
+        assert!(result.contains("translation"));
+        assert!(result.contains("\"\"\""));
+        assert!(result.contains("hello"));
+        assert!(result.contains("world"));
     }
 
     // ###########################################
@@ -291,7 +339,7 @@ mod tests {
     kwarg_seen = _handle_spread({"key": "value"}, """{\"key\": \"value\"}""", args, kwargs, kwarg_seen)
     if kwarg_seen:
         raise SyntaxError("positional argument follows keyword argument")
-    args.append(variable(context, source, (33, 47), filters, tags, 'positional_arg'))
+    args.append(variable(context, source, (33, 47), filters, tags, """positional_arg"""))
     return args, kwargs"#,
         );
     }

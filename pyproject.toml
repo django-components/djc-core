@@ -4,19 +4,15 @@ build-backend = "maturin"
 
 [project]
 name = "djc_core"
-version = "1.2.2"
-requires-python = ">=3.8, <4.0"
+version = "1.3.0"
+requires-python = ">=3.10, <4.0"
 description = "Core library for django-components written in Rust."
 keywords = ["django", "components", "html"]
 readme = "README.md"
-authors = [
-    {name = "Juro Oravec", email = "juraj.oravec.josefson@gmail.com"},
-]
+authors = [{ name = "Juro Oravec", email = "juraj.oravec.josefson@gmail.com" }]
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -27,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = []
-license = {text = "MIT"}
+license = { text = "MIT" }
 
 # See https://docs.pypi.org/project_metadata/#icons
 [project.urls]
@@ -36,15 +32,38 @@ Changelog = "https://github.com/django-components/djc-core/blob/main/CHANGELOG.m
 Issues = "https://github.com/django-components/djc-core/issues"
 Donate = "https://github.com/sponsors/EmilStenstrom"
 
+###########################################
+# ENVIRONMENT DEPENDENCIES
+###########################################
+
+[dependency-groups]
+
+# Dev dependencies - install with `uv sync --group dev`
+dev = ["maturin", "pytest"]
+
+# CI dependencies - install with `uv sync --group ci`
+ci = ["maturin", "pytest"]
+
+###########################################
+# BUILD TOOLS
+###########################################
+
 [tool.maturin]
 # This is the crate that will be exposed to Python
 manifest-path = "crates/djc-core/Cargo.toml"
 features = ["pyo3/extension-module"]
-include = [
-    "djc_core/__init__.py",
-    "djc_core/__init__.pyi",
-    "djc_core/py.typed",
-]
+include = ["djc_core/__init__.py", "djc_core/__init__.pyi", "djc_core/py.typed"]
+
+###########################################
+# TESTING TOOLS
+###########################################
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+###########################################
+# FORMATTING & TYPE-CHECKING TOOLS
+###########################################
 
 [tool.black]
 line-length = 119
@@ -75,30 +94,22 @@ known_first_party = "djc_core"
 ignore = ['E302', 'W503']
 max-line-length = 119
 exclude = [
-  'migrations',
-  '__pycache__',
-  'manage.py',
-  'settings.py',
-  'env',
-  '.env',
-  '.venv',
-  '.tox',
-  'build',
+    'migrations',
+    '__pycache__',
+    'manage.py',
+    'settings.py',
+    'env',
+    '.env',
+    '.venv',
+    '.tox',
+    'build',
 ]
 
 [tool.mypy]
 check_untyped_defs = true
 ignore_missing_imports = true
-exclude = [
-    'build',
-]
+exclude = ['build']
 
 [[tool.mypy.overrides]]
 module = "djc_core.*"
 disallow_untyped_defs = true
-
-
-[tool.pytest.ini_options]
-testpaths = [
-    "tests"
-]
