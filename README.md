@@ -169,7 +169,7 @@ To make sense of the code, the Python API and Rust logic are defined separately:
 2. Install dependencies
 
    ```sh
-   pip install -r requirements-dev.txt
+   uv sync --group dev
    ```
 
    The dev requirements also include `maturin` which is used packaging a Rust project

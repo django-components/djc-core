@@ -76,7 +76,7 @@ pub fn compile_tag_attrs(attributes: &[TagAttr]) -> Result<String, CompileError>
                 ));
             }
             let value_str = compile_value(&attr.value)?;
-            let raw_token_str = attr.value.value.content.replace("\"", "\\\"");
+            let raw_token_str = escape_and_wrap_triple_quotes(&attr.value.value.content);
             body.push_str(&format!(
                 // NOTE: `_handle_spread()` is defined in Python side. It checks at runtime if
                 //       the value is a mapping or an iterable, and handles it accordingly.
@@ -84,7 +84,7 @@ pub fn compile_tag_attrs(attributes: &[TagAttr]) -> Result<String, CompileError>
                 //       and if it's a dict, it will be treated as a keyword arg.
                 //       Thus, if positional args are after kwargs, we raise an error at runtime.
                 // NOTE: Wrap the raw token in triple quotes because it may contain newlines
-                "kwarg_seen = _handle_spread({}, \"\"\"{}\"\"\", args, kwargs, kwarg_seen)\n",
+                "kwarg_seen = _handle_spread({}, {}, args, kwargs, kwarg_seen)\n",
                 value_str, raw_token_str
             ));
         } else {
@@ -121,6 +121,13 @@ pub fn compile_tag_attrs(attributes: &[TagAttr]) -> Result<String, CompileError>
     Ok(final_code)
 }
 
+/// Escape backslashes and double quotes, and wrap in triple quotes for Python string literals.
+/// This handles newlines and special characters safely.
+fn escape_and_wrap_triple_quotes(content: &str) -> String {
+    let escaped = content.replace("\\", "\\\\").replace("\"", "\\\"");
+    format!("\"\"\"{}\"\"\"", escaped)
+}
+
 pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
     // Helper to format token tuple: (start_index, end_index)
     let token_tuple = format!("({}, {})", value.token.start_index, value.token.end_index);
@@ -131,14 +138,29 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
             // The token includes quotes, which is what we want for a Python string literal
             Ok(value.value.content.clone())
         }
-        ValueKind::Variable => Ok(format!(
-            "variable(context, source, {}, filters, tags, '{}')",
-            token_tuple, value.value.content
-        )),
-        ValueKind::TemplateString => Ok(format!(
-            "template_string(context, source, {}, filters, tags, {})",
-            token_tuple, value.value.content
-        )),
+        ValueKind::Variable => {
+            let wrapped = escape_and_wrap_triple_quotes(&value.value.content);
+            Ok(format!(
+                "variable(context, source, {}, filters, tags, {})",
+                token_tuple, wrapped
+            ))
+        }
+        ValueKind::TemplateString => {
+            // Strip surrounding quotes if present
+            let content = value.value.content.trim();
+            let content = if (content.starts_with('"') && content.ends_with('"'))
+                || (content.starts_with('\'') && content.ends_with('\''))
+            {
+                &content[1..content.len() - 1]
+            } else {
+                content
+            };
+            let wrapped = escape_and_wrap_triple_quotes(content);
+            Ok(format!(
+                "template_string(context, source, {}, filters, tags, {})",
+                token_tuple, wrapped
+            ))
+        }
         ValueKind::Translation => {
             let inner_string_start = value.value.content.find('(').map(|i| i + 1).unwrap_or(0);
             let inner_string_end = value
@@ -148,9 +170,19 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
                 .unwrap_or(value.value.content.len());
             if inner_string_start > 0 && inner_string_end > inner_string_start {
                 let inner_string = &value.value.content[inner_string_start..inner_string_end];
+                // Strip surrounding quotes if present
+                let content = inner_string.trim();
+                let content = if (content.starts_with('"') && content.ends_with('"'))
+                    || (content.starts_with('\'') && content.ends_with('\''))
+                {
+                    &content[1..content.len() - 1]
+                } else {
+                    content
+                };
+                let wrapped = escape_and_wrap_triple_quotes(content);
                 Ok(format!(
                     "translation(context, source, {}, filters, tags, {})",
-                    token_tuple, inner_string
+                    token_tuple, wrapped
                 ))
             } else {
                 Err(CompileError::from(format!(
@@ -162,11 +194,10 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
         ValueKind::PythonExpr => {
             // Python expression includes parentheses - take entire expression as-is
             // Escape double quotes and wrap in triple quotes to handle newlines
-            let expr_content = &value.value.content;
-            let escaped = expr_content.replace("\\", "\\\\").replace("\"", "\\\"");
+            let wrapped = escape_and_wrap_triple_quotes(&value.value.content);
             Ok(format!(
-                "expr(context, source, {}, filters, tags, \"\"\"{}\"\"\")",
-                token_tuple, escaped
+                "expr(context, source, {}, filters, tags, {})",
+                token_tuple, wrapped
             ))
         }
         ValueKind::List => {

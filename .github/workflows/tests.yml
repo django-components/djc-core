@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         os: [ubuntu-latest, windows-latest]
 
     steps:
@@ -53,22 +53,18 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
       - name: Install Python dependencies
         run: |
-          # NOTE: maturin requires a virtual environment to be active
-          python -m venv .venv
-          ${{ runner.os == 'Windows' && '.venv\Scripts\activate' || 'source .venv/bin/activate' }}
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-ci.txt
+          uv sync --group ci
 
       - name: Build Python package
         run: |
-          ${{ runner.os == 'Windows' && '.venv\Scripts\activate' || 'source .venv/bin/activate' }}
-          maturin develop
+          uv run maturin develop
 
       - name: Run Python tests
         run: |
-          ${{ runner.os == 'Windows' && '.venv\Scripts\activate' || 'source .venv/bin/activate' }}
-          pytest
+          uv run pytest
