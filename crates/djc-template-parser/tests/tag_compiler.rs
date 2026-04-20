@@ -266,6 +266,17 @@ mod tests {
     }
 
     #[test]
+    fn test_multiline_plain_string() {
+        // A plain multiline string (no template tags) should use triple quotes
+        // so the generated Python code is valid (not an unterminated string literal).
+        let input = "{% my_tag key=\"on click\ndo something\" / %}";
+        assert_compile_tag_attrs(
+            input,
+            "def compiled_func(context):\n    args = []\n    kwargs = []\n    kwargs.append(('key', \"\"\"on click\ndo something\"\"\"))\n    return args, kwargs",
+        );
+    }
+
+    #[test]
     fn test_multiline_template_string() {
         // Test multiline template string (contains {{ }}) - should use triple quotes
         let input = r#"{% my_tag key="{{ var1 }}
