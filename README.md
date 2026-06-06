@@ -182,6 +182,7 @@ To make sense of the code, the Python API and Rust logic are defined separately:
 4. Run Rust tests
 
    ```sh
+   git submodule update --init --recursive
    cargo test
    ```
 
