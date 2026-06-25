@@ -135,8 +135,19 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
     let compiled_value = match value.kind {
         ValueKind::Int | ValueKind::Float => Ok(value.value.content.clone()),
         ValueKind::String => {
-            // The token includes quotes, which is what we want for a Python string literal
-            Ok(value.value.content.clone())
+            let content = value.value.content.trim();
+            // Strip surrounding quotes
+            let (quote_char, inner) = if content.starts_with('"') && content.ends_with('"') {
+                ('"', &content[1..content.len() - 1])
+            } else if content.starts_with('\'') && content.ends_with('\'') {
+                ('\'', &content[1..content.len() - 1])
+            } else {
+                // No surrounding quotes, emit as-is
+                return Ok(content.to_string());
+            };
+            // Escape literal newlines so the string stays a valid single-line Python literal
+            let escaped = inner.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r");
+            Ok(format!("{}{}{}", quote_char, escaped, quote_char))
         }
         ValueKind::Variable => {
             let wrapped = escape_and_wrap_triple_quotes(&value.value.content);
