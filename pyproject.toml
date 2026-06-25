@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "djc_core"
-version = "1.3.0"
+version = "1.3.1"
 requires-python = ">=3.10, <4.0"
 description = "Core library for django-components written in Rust."
 keywords = ["django", "components", "html"]

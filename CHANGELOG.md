@@ -1,5 +1,24 @@
 # Release notes
 
+## v1.3.1
+
+### Fix
+
+- Fix `SyntaxError` when a tag value was a multiline plain string (a quoted
+  string that spans multiple lines and contains no `{{ }}` template
+  expressions), e.g. an Alpine.js or hyperscript handler:
+
+    ```django
+    {% component "small_button"
+        _="on click
+            set replyForm to closest <form />"
+    %}{% endcomponent %}
+    ```
+
+    Literal newlines are now escaped when the string is compiled to a Python
+    literal, so the value stays a valid single-line literal. Regression from
+    v1.3.0. ([#37](https://github.com/django-components/djc-core/pull/37))
+
 ## v1.3.0
 
 Drop support for Python 3.8 and 3.9.
