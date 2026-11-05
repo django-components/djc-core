@@ -68,13 +68,13 @@ fn add_attributes(
             .attributes()
             .find(|a| {
                 if let Ok(attr) = a {
-                    String::from_utf8_lossy(attr.key.as_ref()) == *watch_attr
+                    attr.key.into_inner() == watch_attr.as_str()
                 } else {
                     false
                 }
             })
             .and_then(|a| a.ok())
-            .map(|a| String::from_utf8_lossy(a.value.as_ref()).into_owned())
+            .map(|a| a.value.into_owned())
         {
             captured_attributes.push((attr_value, added_attrs));
         }
@@ -105,9 +105,7 @@ pub fn transform(
         match reader.read_event() {
             // Start tag
             Ok(Event::Start(e)) => {
-                let tag_name = String::from_utf8_lossy(e.name().as_ref())
-                    .to_string()
-                    .to_lowercase();
+                let tag_name = e.name().into_inner().to_lowercase();
                 let mut elem = e.into_owned();
                 add_attributes(config, &mut elem, depth == 0, &mut captured_attributes);
 
@@ -122,9 +120,7 @@ pub fn transform(
 
             // End tag
             Ok(Event::End(e)) => {
-                let tag_name = String::from_utf8_lossy(e.name().as_ref())
-                    .to_string()
-                    .to_lowercase();
+                let tag_name = e.name().into_inner().to_lowercase();
 
                 // Skip end tags for void elements
                 if !config.void_elements.contains(&tag_name) {
@@ -241,6 +237,37 @@ mod tests {
         assert!(result.contains("Hello & Welcome"));
         assert!(result.contains("&copy; 2024"));
         assert!(result.contains(r#"<strong data-all="" data-v-123="">bold</strong>"#));
+    }
+
+    #[test]
+    fn test_doctype_quotes() {
+        let config = HtmlTransformerConfig::new(vec!["data-root".to_string()], vec![], false, None);
+
+        // An ordinary DOCTYPE, with quoted identifiers.
+        let input = r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN" "x.dtd"><div>x</div>"#;
+        let (result, _) = transform(&config, input).unwrap();
+        assert_eq!(
+            result,
+            r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN" "x.dtd"><div data-root="">x</div>"#
+        );
+
+        // quick-xml reads quoted text as part of the DOCTYPE, so this `>` does not end it.
+        let input = r#"<!DOCTYPE html "a>b<c d"><div>x</div>"#;
+        let (result, _) = transform(&config, input).unwrap();
+        assert_eq!(
+            result,
+            r#"<!DOCTYPE html "a>b<c d"><div data-root="">x</div>"#
+        );
+
+        // For the same reason, an unmatched quote or `[` leaves the DOCTYPE open.
+        for input in [
+            "<!DOCTYPE html '><div>x</div>",
+            "<!doctype html it's><div>x</div>",
+            "<!DOCTYPE html [ ><div>x</div>",
+        ] {
+            let error = transform(&config, input).unwrap_err().to_string();
+            assert!(error.contains("DOCTYPE not closed"), "{error}");
+        }
     }
 
     #[test]
