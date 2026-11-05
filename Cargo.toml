@@ -109,7 +109,7 @@ static_assertions = "1.1.0"
 
 # https://ohadravid.github.io/posts/2023-03-rusty-python
 [profile.release]
-debug = true      # Debug symbols for profiler.
+debug = false     # Debug info would be most of the size of a Linux wheel.
 lto = true        # Link-time optimization.
 codegen-units = 1 # Slower compilation but faster code.
 
