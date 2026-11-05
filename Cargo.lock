@@ -339,6 +339,7 @@ dependencies = [
  "djc-safe-eval",
  "djc-template-parser",
  "pyo3",
+ "pyo3-build-config",
  "quick-xml",
 ]
 
