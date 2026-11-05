@@ -1,4 +1,5 @@
 import builtins
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Tuple
 
 from djc_core.rust import safe_eval as safe_eval_module
@@ -7,6 +8,7 @@ from djc_core.safe_eval.sandbox import (
     is_safe_attribute,
     is_safe_callable,
     is_safe_variable,
+    unsafe_attribute_hint,
 )
 
 
@@ -150,35 +152,51 @@ def safe_eval(
         assign_fn = assign
 
     # Create evaluation namespace with wrapped functions
-    # These are captured in the closure of the lambda function we'll create
+    # These are captured in the closure of the function we'll create
+    # The names start with `_sx_`, as the Rust transformer writes them (`GENERATED_NAMES` in
+    # `djc_safe_eval`). A template can neither read a `_` name nor bind one with this
+    # prefix, so no template name can replace a helper.
     eval_namespace = {
-        "variable": variable_fn,
-        "attribute": attribute_fn,
-        "subscript": subscript_fn,
-        "call": call_fn,
-        "assign": assign_fn,
-        "slice": slice,
-        "interpolation": interpolation,
-        "template": template,
-        "format": format,
+        "_sx_variable": variable_fn,
+        "_sx_attribute": attribute_fn,
+        "_sx_subscript": subscript_fn,
+        "_sx_call": call_fn,
+        "_sx_assign": assign_fn,
+        "_sx_slice": slice,
+        "_sx_interpolation": interpolation,
+        "_sx_template": template,
+        "_sx_format": format,
         # Pass through the source string. This way we won't have to re-define
         # the functions on each evaluation.
-        "source": source,
+        "_sx_source": source,
+        # Without this entry, `exec()` adds the real builtins to the namespace, and a plain
+        # name the transformer let through would reach them. The generated code needs no
+        # builtin, so an empty mapping is a second layer behind the Rust check. PyPy
+        # ignores it.
+        "__builtins__": _NO_BUILTINS,
     }
 
     # Get transformed code from Rust
     transformed_code = safe_eval_module.safe_eval(source)
 
-    # Wrap the transformed code in a lambda that captures the helper functions
+    # Wrap the transformed code in a function that captures the helper functions
     # This avoids the overhead of calling eval() and creating a dict on each evaluation
-    # NOTE: The lambda is assigned to a variable because we use `exec()` instead of `eval()`
+    # NOTE: The function is defined with `exec()` instead of `eval()`
     #       to support triple-quoted multi-line strings (which `eval()` doesn't handle).
-    #       And while `eval()` returns its result directly, with `exec()` we need to assign it to a variable.
     #       We wrap with parentheses and newlines to allow multi-line expressions and trailing comments:
     #       the newlines ensure that trailing comments don't swallow the closing parenthesis.
-    lambda_code = f"_eval_expr = lambda context: (\n{transformed_code}\n)"
+    # Callers pass the mapping as `context`, by position or by keyword. The generated code reads
+    # it as `_sx_context`, so the public parameter is moved there and deleted: a template name
+    # `context` then never refers to the real mapping.
+    lambda_code = f"def _eval_expr(context):\n    _sx_context = context\n    del context\n    return (\n{transformed_code}\n)"
 
     return _exec_func_with_error_handling(lambda_code, "_eval_expr", source, "expression", eval_namespace)
+
+
+# A read-only empty mapping used as `__builtins__` while the generated code runs. On CPython
+# it hides every builtin; PyPy ignores it. Because it is read-only, an expression cannot
+# change it for the next one, and it can be shared without a per-call copy.
+_NO_BUILTINS: Mapping[str, Any] = MappingProxyType({})
 
 
 # NOTE: This is used also in djc_template_parser.
@@ -234,8 +252,8 @@ def _exec_func_with_error_handling(func_string: str, func_name: str, source: str
 #
 # is transformed into:
 # ```python
-# variable((0, 4), source, context, "my_var")
-# assign((0, 18), source, context, "obj", {"attr": 2})
+# _sx_variable(_sx_context, _sx_source, (0, 6), "my_var")
+# _sx_assign(_sx_context, _sx_source, (0, 18), "obj", {"attr": 2})
 # ```
 #
 # Each interceptor function receives the same 3 first positional arguments:
@@ -273,9 +291,12 @@ def attribute(
 ) -> Any:
     """Access an attribute of an object, e.g. `obj.attr`"""
     if not is_safe_attribute(obj, attr_name):
-        raise SecurityError(
-            f"attribute '{attr_name}' on object '{type(obj)}' is unsafe"
-        )
+        error_msg = f"attribute '{attr_name}' on object '{type(obj)}' is unsafe"
+        # Name the replacement for the formatting methods, as a refused call does.
+        hint = unsafe_attribute_hint(attr_name)
+        if hint:
+            error_msg += f". {hint}"
+        raise SecurityError(error_msg)
     return getattr(obj, attr_name)
 
 

@@ -8,6 +8,11 @@
   Free-threaded wheels are for Linux and macOS. On free-threaded Python, importing
   `djc_core` turns the GIL on and Python prints a `RuntimeWarning`.
 
+### Fix
+
+- Tighten the checks `safe_eval()` applies to comprehensions, lambda parameters,
+  and string formatting.
+
 ### Refactor
 
 - Upgrade the Rust dependencies, including PyO3 to 0.30.1 and quick-xml to

@@ -21,10 +21,10 @@ use djc_safe_eval::safe_eval as safe_eval_rust;
 ///
 /// Example:
 ///     >>> safe_eval("my_var + 1")
-///     'variable("my_var") + 1'
+///     "_sx_variable(_sx_context, _sx_source, (0, 6), 'my_var') + 1"
 ///
 ///     >>> safe_eval("lambda x: x + my_var")
-///     'lambda x: x + variable("my_var")'
+///     "lambda x: x + _sx_variable(_sx_context, _sx_source, (14, 20), 'my_var')"
 #[pyfunction]
 #[pyo3(signature = (source))]
 pub fn safe_eval(source: &str) -> PyResult<String> {
