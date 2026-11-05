@@ -56,7 +56,9 @@ jobs:
         platform:
           - runner: ubuntu-latest
             target: x86_64
-          - runner: ubuntu-latest
+          # The 32-bit manylinux image cannot resolve any hostname on Ubuntu 26.04,
+          # even with its own DNS server, and the build step needs the network.
+          - runner: ubuntu-24.04
             target: x86
           - runner: ubuntu-latest
             target: aarch64
