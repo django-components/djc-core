@@ -16,8 +16,37 @@ on:
 permissions:
   contents: read
 
+env:
+  # On Linux targets that are cross-compiled, `--find-interpreter` builds for the
+  # Python versions listed inside maturin, so the maturin version decides the set
+  # of wheels. 1.15.0 lists no Python 3.15 there; 1.16.0 does.
+  MATURIN_VERSION: "1.16.0"
+
 jobs:
+  # Runs first so that a wrong tag fails in seconds, before the wheels are built.
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Only a tag publishes to PyPI. A branch run is a dry run, so there is no
+      # version to check. Only this step is skipped, because skipping the job
+      # would also skip every job that needs it.
+      - name: Check that the tag matches the version in pyproject.toml
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          # A tag must match the version in its own commit. Otherwise a mistyped
+          # tag, or a tag on a commit whose version was not updated, would upload
+          # wheels under the wrong release. Commits from before this check have no
+          # such check.
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "$GITHUB_REF_NAME" != "$version" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match version '$version' in pyproject.toml"
+            exit 1
+          fi
+
   linux:
+    needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -45,6 +74,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: "true"
@@ -56,6 +86,7 @@ jobs:
           path: dist
 
   musllinux:
+    needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -79,6 +110,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: "true"
@@ -90,6 +122,7 @@ jobs:
           path: dist
 
   windows:
+    needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -141,6 +174,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: "true"
@@ -151,6 +185,7 @@ jobs:
           path: dist
 
   macos:
+    needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -196,6 +231,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: "true"
@@ -206,6 +242,7 @@ jobs:
           path: dist
 
   sdist:
+    needs: [check-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -215,6 +252,7 @@ jobs:
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           command: sdist
           args: --out dist
       - name: Upload sdist
@@ -247,5 +285,6 @@ jobs:
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
           command: upload
           args: --non-interactive --skip-existing wheels-*/*
