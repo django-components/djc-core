@@ -16,6 +16,8 @@
   `'x' f'{y}'` keeps its `'x'`, and `f'{x=}'` shows `x=` before the value. A lone
   surrogate escape such as `'\ud800'` now means that character, and a t-string
   interpolation's `expression` holds its source text.
+- An expression nested too deeply now raises `SyntaxError` instead of crashing
+  the process.
 
 ### Refactor
 
