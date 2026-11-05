@@ -1,4 +1,5 @@
 # ruff: noqa: E731
+import builtins
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
@@ -1816,6 +1817,18 @@ class TestSecurity:
         context = {"totally_no_e_val": eval}
         with pytest.raises(
             SecurityError, match="function '<built-in function eval>' is unsafe"
+        ):
+            compiled(context)
+
+    @pytest.mark.skipif(
+        not hasattr(builtins, "__lazy_import__"), reason="New builtin in Python 3.15"
+    )
+    def test_block_unsafe_builtin_lazy_import(self):
+        compiled = safe_eval("lazy_import('os')")
+        context = {"lazy_import": builtins.__lazy_import__}
+        with pytest.raises(
+            SecurityError,
+            match="function '<built-in function __lazy_import__>' is unsafe",
         ):
             compiled(context)
 

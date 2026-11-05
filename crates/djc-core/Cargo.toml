@@ -15,3 +15,6 @@ djc-safe-eval = { path = "../djc-safe-eval" }
 djc-template-parser = { path = "../djc-template-parser" }
 pyo3 = { workspace = true }
 quick-xml = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = { workspace = true }
