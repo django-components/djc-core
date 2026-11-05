@@ -1,9 +1,8 @@
 //! Reject an expression whose syntax tree could nest too deeply, before any
 //! code builds or walks that tree.
 //!
-//! Ruff's parser grows its own stack, but the passes after it do not: the
-//! keyword check, the sandbox transformer, code generation, and dropping the
-//! tree all call themselves once per tree level. A long chain such as
+//! Ruff's parser and the passes after it call themselves once per tree level,
+//! and so does dropping the tree. A long chain such as
 //! `1+1+...+1`, `not not ... x` or `a.b.b...` nests the tree one level per
 //! operator, with no brackets at all, and enough of them overflowed the
 //! stack and crashed the process.

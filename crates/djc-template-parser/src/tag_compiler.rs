@@ -286,18 +286,18 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
 
     // Apply filters
     for filter in &value.filters {
-        let filter_name = &filter.name.content;
+        let filter_name = python_string_literal(&filter.name.content, '\'');
         let filter_token_tuple =
             format!("({}, {})", filter.token.start_index, filter.token.end_index);
         if let Some(arg) = &filter.arg {
             let compiled_arg = compile_value(arg)?;
             result = format!(
-                "filter(context, source, {}, filters, tags, '{}', {}, {})",
+                "filter(context, source, {}, filters, tags, {}, {}, {})",
                 filter_token_tuple, filter_name, result, compiled_arg
             );
         } else {
             result = format!(
-                "filter(context, source, {}, filters, tags, '{}', {}, None)",
+                "filter(context, source, {}, filters, tags, {}, {}, None)",
                 filter_token_tuple, filter_name, result
             );
         }

@@ -1856,6 +1856,8 @@ class TestString:
             (r'''"say \"hi\""''', 'say "hi"'),
             (r'''"\"quoted\""''', '"quoted"'),
             (r"""'it\'s'""", "it's"),
+            # Text after the escaped quote stays inside the string.
+            (r'''"a\" + b + \"c"''', 'a" + b + "c'),
             # The other quote and every other backslash stand for themselves.
             (r"""'say "hi"'""", 'say "hi"'),
             (r'''"it\'s"''', r"it\'s"),

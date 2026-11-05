@@ -251,6 +251,8 @@ The sandbox refuses the cases below. Each raises `SecurityError` when the expres
 - **It checks only what the expression text writes.** A function you pass in that calls other functions or looks up names from text (`map`, `functools.reduce`, the `key=` argument of `sorted`, a `getattr`-style helper, `inspect`, `importlib`) does so without these checks.
 - **Item keys that start with `_` are not hidden.** `data["_key"]` is refused, but `data.get("_key")` and `"%(_key)s" % data` read the same item.
 
+An expression nested too deeply raises `SyntaxError`. The limit is about 97 chained operators or 65 nested brackets.
+
 ## Syntax features
 
 _This section describes the features enforced on the compiler (Rust) level._

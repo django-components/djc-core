@@ -12,14 +12,14 @@
 
 - Tighten the checks `safe_eval()` applies to comprehensions, lambda parameters,
   and string formatting.
-- F-strings in `safe_eval()` now behave as in Python: `f'{{a}}'` gives `{a}`,
+- F-string text in `safe_eval()` now reads as in Python: `f'{{a}}'` gives `{a}`,
   `'x' f'{y}'` keeps its `'x'`, and `f'{x=}'` shows `x=` before the value. A lone
   surrogate escape such as `'\ud800'` now means that character, and a t-string
   interpolation's `expression` holds its source text.
-- An expression nested too deeply now raises `SyntaxError` instead of crashing
-  the process.
-- A tag string can now hold its own quote as `\"` or `\'`, which used to raise
-  `SyntaxError`, and a tag key can end in a backslash.
+- A `safe_eval()` expression nested too deeply now raises `SyntaxError` instead
+  of crashing the process.
+- A plain tag string can now hold its own quote as `\"` or `\'`, and a tag key can
+  end in a backslash.
 
 ### Refactor
 

@@ -9,8 +9,10 @@ What the sandbox does
 It checks every variable, attribute, item, and call that the expression text writes.
 It refuses:
 
-- Names that start with `_`: variables, attributes (so no `obj.__class__`), and string
-  item keys (`data["_key"]`).
+- Names that start with `_`: variables read from the context, attributes (so no
+  `obj.__class__`), and string item keys (`data["_key"]`). A lambda parameter or
+  comprehension variable may start with `_`, because it holds only what the expression
+  gave it.
 - Calls to functions that are dangerous by themselves, such as `eval`, `getattr`, and `open`.
   The check compares the function, not its name, so a function passed in under another
   name, or wrapped in `functools.partial`, is refused too.

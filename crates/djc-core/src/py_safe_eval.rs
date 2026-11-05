@@ -17,7 +17,8 @@ use djc_safe_eval::safe_eval as safe_eval_rust;
 ///     str: The transformed Python expression as a string.
 ///
 /// Raises:
-///     SyntaxError: If the input is not valid Python syntax or contains forbidden constructs.
+///     SyntaxError: If the input is not valid Python syntax, contains forbidden constructs,
+///         or nests too deeply (more than about 97 chained operators or 65 nested brackets).
 ///
 /// Example:
 ///     >>> safe_eval("my_var + 1")

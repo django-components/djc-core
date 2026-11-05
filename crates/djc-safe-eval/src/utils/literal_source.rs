@@ -1,6 +1,6 @@
 //! Write a string literal into the generated code from its own source text.
 //!
-//! ruff's Python parser, which this crate uses, decodes every string literal
+//! Ruff's Python parser, which this crate uses, decodes every string literal
 //! into a Rust string, and the generator writes a literal back from that
 //! decoded value. A lone surrogate escape such as `\ud800` or `\U0000dfff`
 //! has no Rust form, so the parser decodes it to U+FFFD (the replacement

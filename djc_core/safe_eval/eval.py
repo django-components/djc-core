@@ -36,6 +36,9 @@ def safe_eval(
 
     This is the re-implementation of Jinja's sandboxed evaluation logic.
 
+    The expression text must come from the template author. Pass request data in the
+    context, as a value.
+
     Args:
         source: The Python expression string to transform.
         validate_variable: Optional extra validation for variable lookups.

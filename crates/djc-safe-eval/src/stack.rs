@@ -1,12 +1,13 @@
 //! Make sure djc-safe-eval's own passes over one expression have enough
 //! stack, whatever thread runs them.
 //!
-//! The passes over an expression's tree (the keyword check, the sandbox
-//! transformer, and code generation) call themselves once per tree level.
-//! `nesting::MAX_NESTING` bounds the depth, but at that depth the passes still
-//! need more stack than a small thread has: a debug build used about 9 KB per
-//! level (measured on macOS arm64, where a 256 KiB thread handled only about
-//! 28 levels), and a release build about 1.2 KB.
+//! The passes over an expression's tree (parsing, the sandbox transformer, and
+//! code generation) call themselves once per tree level. `nesting::MAX_NESTING`
+//! bounds the depth, but at that depth the passes still need more stack than a
+//! small thread has. citry-core, which this module comes from, measured about
+//! 9 KB per level in a debug build and about 1.2 KB in a release build on
+//! macOS arm64, with one more pass than this crate runs. `tests/nesting.rs`
+//! checks this crate on a 256 KiB thread.
 //!
 //! So each public entry point runs its work through `with_enough_stack`. When
 //! less than `RED_ZONE` is left, `stacker` runs the work on a new stack
