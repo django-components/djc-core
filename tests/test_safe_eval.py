@@ -1,6 +1,7 @@
 # ruff: noqa: E731
 import builtins
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
 
@@ -2303,3 +2304,143 @@ class TestErrorReporting:
             ),
         ):
             compiled(context)
+
+
+# Expressions the sandbox must evaluate exactly as Python does: lone
+# surrogate escapes, which the Rust parser cannot decode as Python does;
+# look-alikes that hold none (an escaped backslash, raw and bytes literals);
+# and f-string text the sandbox rebuilds as a `str.format` template.
+LITERALS_PYTHON_READS = [
+    r"'\ud800'",
+    r"'a\U0000dfffb'",
+    r"'\ud800' 'a'",
+    "('\\ud800'\n 'b')",
+    "'''a\n\\ud800'''",
+    r"{'\ud800': 1}['\ud800']",
+    r"'\\ud800'",
+    r"r'\ud800'",
+    r"b'\ud800'",
+    r"f'\ud800{x}'",
+    r"f'''\ud800'{x}'''",
+    r"f'\N{BULLET}{{\ud800}}{x}'",
+    r"f'{x:\ud800>5}'",
+    r"f'{x:{w}}\ud800'",
+    r"rf'\ud800{x}'",
+    r"'\ud800' f'{x}'",
+    r"f'{{a}}'",
+    r"f'{x}{{'",
+    r"'x' f'{x}'",
+    r"f'{x}' 'z{'",
+    r"f'\{{'",
+    r"f'\ud800\{x}'",
+    r"f'\ud800\\\{x}'",
+    "f'{x=}'",
+    "f'{x = !r:>8}'",
+    "f'{ {1:2}[1] = }'",
+    "f'a{x=}b{w=:>3}'",
+]
+
+
+@pytest.mark.parametrize("source", LITERALS_PYTHON_READS)
+def test_sandbox_reads_literals_as_python_does(source: str) -> None:
+    context = {"x": 5, "w": 4}
+    assert safe_eval(source)(dict(context)) == eval(source, {}, dict(context))  # noqa: S307
+
+
+# A comment inside an f-string's replacement field; Python's own parser
+# accepts it only from 3.12 (PEP 701), while the sandbox reads it everywhere.
+COMMENTED_DEBUG_FSTRINGS = ["f'''{x # c\n=}'''", "f'''{(x # c\n)=}'''"]
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Python parses a comment in an f-string from 3.12")
+@pytest.mark.parametrize("source", COMMENTED_DEBUG_FSTRINGS)
+def test_sandbox_leaves_comments_out_of_self_documenting_text(source: str) -> None:
+    context = {"x": 5}
+    assert safe_eval(source)(dict(context)) == eval(source, {}, dict(context))  # noqa: S307
+
+
+# A t-string interpolation keeps its own source text as `expression`.
+TSTRING_EXPRESSIONS = [
+    "t'{x + 1}'",
+    "t'{ x }'",
+    "t'{x=}'",
+    "t'{ x = }'",
+    "t'{x!r:>4}'",
+    "t'{x:{w}}'",
+    "t'{ (x) }'",
+    "t'{x == 1}'",
+    "t'{x != 1}'",
+    "t'{\"}\"}'",
+    "t'''{x + # a comment\n 1}'''",
+    "t'''{\n  x  # é\n}'''",
+    "t'{x}' t'{ w }'",
+    # A comment in a nested string belongs to that string's text.
+    "t'''{f\"\"\"{x # c\n}\"\"\"}'''",
+    # A backslash line continuation after the expression is part of it.
+    "t'''{x \\\n}'''",
+    # A self-documenting interpolation drops its comments from its `x=` too.
+    "t'''{x # c\n=}'''",
+]
+
+
+@pytest.mark.skipif(not TSTRINGS_SUPPORTED, reason="t-strings need Python 3.14+")
+@pytest.mark.parametrize("source", TSTRING_EXPRESSIONS)
+def test_sandbox_keeps_each_tstring_interpolations_expression_text(source: str) -> None:
+    context = {"x": 5, "w": 3}
+    sandboxed = safe_eval(source)(dict(context))
+    plain = eval(source, {}, dict(context))  # noqa: S307
+    assert [item.expression for item in sandboxed.interpolations] == [item.expression for item in plain.interpolations]
+    # The text before each value, including a self-documenting `x=`.
+    assert sandboxed.strings == plain.strings
+
+
+class TextInAnFString:
+    """A value whose format spec is visible in the result, with a public and a hidden attribute."""
+
+    public = "PUBLIC-VALUE"
+    _hidden = "HIDDEN-VALUE"
+
+    def __format__(self, spec: str) -> str:
+        return f"[{spec}]"
+
+
+# Text that looks like a `str.format` field. The sandbox builds a `str.format` template from
+# an f-string, so each of these must stay plain text, as it does in Python.
+FSTRING_TEXT_THAT_LOOKS_LIKE_A_FIELD = [
+    'f"{{0._hidden}}{{{x}}}"',
+    'f"{{0.public}}{x}"',
+    r'''f"\x7b0._hidden\x7d\x7b{x}\x7d"''',
+    'f"{{._hidden}}{{{x}}}"',
+    # In a format spec `{{` opens a nested field, so a literal brace is written as an escape.
+    r'''f"{x:{w}\x7b0._hidden\x7d}"''',
+    r'''f"{x:\x7b0._hidden\x7d}"''',
+]
+
+
+@pytest.mark.parametrize("source", FSTRING_TEXT_THAT_LOOKS_LIKE_A_FIELD)
+def test_fstring_text_stays_text(source: str) -> None:
+    context = {"x": TextInAnFString(), "w": 4}
+    assert safe_eval(source)(dict(context)) == eval(source, {}, dict(context))
+
+
+def test_fstring_text_runs_no_attribute_read_outside_the_check() -> None:
+    # The hidden value must not appear, and the extra validator stays the only way to reach it.
+    seen = []
+
+    def validate_attribute(obj: Any, name: str) -> bool:
+        seen.append(name)
+        return True
+
+    compiled = safe_eval('f"{{0._hidden}}{{{x}}}"', validate_attribute=validate_attribute)
+    result = compiled({"x": TextInAnFString()})
+    assert "HIDDEN-VALUE" not in result
+    assert seen == []
+
+
+@pytest.mark.skipif(not TSTRINGS_SUPPORTED, reason="t-strings need Python 3.14+")
+def test_tstring_dynamic_format_spec_text_stays_text() -> None:
+    source = r'''t"{x:{w}\x7b0._hidden\x7d}"'''
+    context = {"x": TextInAnFString(), "w": 4}
+    actual = safe_eval(source)(dict(context))
+    expected = eval(source, {}, dict(context))
+    assert actual.interpolations[0].format_spec == expected.interpolations[0].format_spec

@@ -12,6 +12,10 @@
 
 - Tighten the checks `safe_eval()` applies to comprehensions, lambda parameters,
   and string formatting.
+- F-strings in `safe_eval()` now behave as in Python: `f'{{a}}'` gives `{a}`,
+  `'x' f'{y}'` keeps its `'x'`, and `f'{x=}'` shows `x=` before the value. A lone
+  surrogate escape such as `'\ud800'` now means that character, and a t-string
+  interpolation's `expression` holds its source text.
 
 ### Refactor
 

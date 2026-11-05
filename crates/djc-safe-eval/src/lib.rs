@@ -2,6 +2,7 @@ pub mod codegen;
 pub mod comments;
 pub mod transformer;
 mod utils {
+    pub mod literal_source;
     pub mod python_ast;
 }
 

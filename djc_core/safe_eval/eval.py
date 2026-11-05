@@ -419,6 +419,10 @@ def format(
 
     This wraps the built-in str.format() method so that errors inside f-strings get nice
     error reporting with underlining via the `@error_context` decorator.
+
+    `template_string` and a dynamic spec's template come from the Rust transformer, which
+    doubles every literal brace, so their only fields are bare `{}` placeholders. No field
+    can follow an attribute path, which would run outside the sandbox's checks.
     """
     processed_args = []
     for value, conversion_flag, format_spec in args:

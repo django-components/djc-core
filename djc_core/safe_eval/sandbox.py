@@ -60,7 +60,9 @@ We do NOT support:
 - Async functions, coroutines, etc.
 - The string formatting methods above. Jinja runs them through a sandboxed formatter;
   we refuse them. Use f-strings instead, which the transformer rewrites so that every
-  lookup inside is checked.
+  lookup inside is checked. The rewrite builds a `str.format` template with each literal
+  brace doubled, so text in an f-string or its format spec stays text and cannot add a
+  field that reads an attribute.
 
 We add these safety features not present in Jinja:
 - Prevent users from calling unsafe builtins like `eval` even if they were passed as variables.

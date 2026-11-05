@@ -1639,7 +1639,7 @@ mod tests {
         // t-strings become template() function calls
         _test_transformation(
             "t'Hello {name}'",
-            "_sx_template(_sx_context, _sx_source, (0, 15), 'Hello ', _sx_interpolation(_sx_context, _sx_source, (8, 14), _sx_variable(_sx_context, _sx_source, (9, 13), 'name'), '', None, ''))",
+            "_sx_template(_sx_context, _sx_source, (0, 15), 'Hello ', _sx_interpolation(_sx_context, _sx_source, (8, 14), _sx_variable(_sx_context, _sx_source, (9, 13), 'name'), 'name', None, ''))",
             vec![("name", 9, 13, (1, 10))],
             vec![],
         );
@@ -1649,7 +1649,7 @@ mod tests {
     fn test_transform_tstring_with_expression() {
         _test_transformation(
             "t'Result: {x + 1}'",
-            "_sx_template(_sx_context, _sx_source, (0, 18), 'Result: ', _sx_interpolation(_sx_context, _sx_source, (10, 17), _sx_variable(_sx_context, _sx_source, (11, 12), 'x') + 1, '', None, ''))",
+            "_sx_template(_sx_context, _sx_source, (0, 18), 'Result: ', _sx_interpolation(_sx_context, _sx_source, (10, 17), _sx_variable(_sx_context, _sx_source, (11, 12), 'x') + 1, 'x + 1', None, ''))",
             vec![("x", 11, 12, (1, 12))],
             vec![],
         );
@@ -1659,7 +1659,7 @@ mod tests {
     fn test_transform_tstring_multiple_interpolations() {
         _test_transformation(
             "t'{x} and {y}'",
-            "_sx_template(_sx_context, _sx_source, (0, 14), _sx_interpolation(_sx_context, _sx_source, (2, 5), _sx_variable(_sx_context, _sx_source, (3, 4), 'x'), '', None, ''), ' and ', _sx_interpolation(_sx_context, _sx_source, (10, 13), _sx_variable(_sx_context, _sx_source, (11, 12), 'y'), '', None, ''))",
+            "_sx_template(_sx_context, _sx_source, (0, 14), _sx_interpolation(_sx_context, _sx_source, (2, 5), _sx_variable(_sx_context, _sx_source, (3, 4), 'x'), 'x', None, ''), ' and ', _sx_interpolation(_sx_context, _sx_source, (10, 13), _sx_variable(_sx_context, _sx_source, (11, 12), 'y'), 'y', None, ''))",
             vec![("x", 3, 4, (1, 4)), ("y", 11, 12, (1, 12))],
             vec![],
         );
@@ -1670,7 +1670,7 @@ mod tests {
         // Format spec is stored in the interpolation object
         _test_transformation(
             "t'start {value:.2f} end'",
-            "_sx_template(_sx_context, _sx_source, (0, 24), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 19), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), '', None, '.2f'), ' end')",
+            "_sx_template(_sx_context, _sx_source, (0, 24), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 19), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), 'value', None, '.2f'), ' end')",
             vec![("value", 9, 14, (1, 10))],
             vec![],
         );
@@ -1681,7 +1681,7 @@ mod tests {
         // Conversion flag is stored in the interpolation object
         _test_transformation(
             "t'start {value!r} end'",
-            "_sx_template(_sx_context, _sx_source, (0, 22), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 17), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), '', 'r', ''), ' end')",
+            "_sx_template(_sx_context, _sx_source, (0, 22), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 17), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), 'value', 'r', ''), ' end')",
             vec![("value", 9, 14, (1, 10))],
             vec![],
         );
@@ -1692,7 +1692,7 @@ mod tests {
         // Both conversion and format spec are stored in the interpolation object
         _test_transformation(
             "t'start {value!r:>20} end'",
-            "_sx_template(_sx_context, _sx_source, (0, 26), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 21), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), '', 'r', '>20'), ' end')",
+            "_sx_template(_sx_context, _sx_source, (0, 26), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 21), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), 'value', 'r', '>20'), ' end')",
             vec![("value", 9, 14, (1, 10))],
             vec![],
         );
@@ -1703,7 +1703,7 @@ mod tests {
         // Dynamic format spec: the format spec itself is built using .format()
         _test_transformation(
             "t'start {value:{width}.{precision}f} end'",
-            "_sx_template(_sx_context, _sx_source, (0, 41), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 36), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), '', None, '{}.{}f'.format(_sx_variable(_sx_context, _sx_source, (16, 21), 'width'), _sx_variable(_sx_context, _sx_source, (24, 33), 'precision'))), ' end')",
+            "_sx_template(_sx_context, _sx_source, (0, 41), 'start ', _sx_interpolation(_sx_context, _sx_source, (8, 36), _sx_variable(_sx_context, _sx_source, (9, 14), 'value'), 'value', None, '{}.{}f'.format(_sx_variable(_sx_context, _sx_source, (16, 21), 'width'), _sx_variable(_sx_context, _sx_source, (24, 33), 'precision'))), ' end')",
             vec![
                 ("value", 9, 14, (1, 10)),
                 ("width", 16, 21, (1, 17)),
@@ -2671,6 +2671,189 @@ mod tests {
                 },
             ],
         );
+    }
+
+    fn _test_generated(cases: &[(&str, &str)]) {
+        for (input, expected) in cases {
+            let result = transform_expression_string(input).unwrap();
+            assert_eq!(
+                generate_python_code(&result.expression),
+                *expected,
+                "{input}"
+            );
+        }
+    }
+
+    // === LITERALS THE PARSER CANNOT DECODE AS PYTHON DOES ===
+
+    #[test]
+    fn test_lone_surrogate_escapes_are_written_from_their_source() {
+        // The parser decodes a lone surrogate escape to U+FFFD, so the
+        // literal (or the f-string or t-string text holding it) is written
+        // from its source text, and Python decodes the escape itself.
+        _test_generated(&[
+            (
+                r#"row['\ud800']"#,
+                r#"_sx_subscript(_sx_context, _sx_source, (0, 13), _sx_variable(_sx_context, _sx_source, (0, 3), 'row'), '\ud800')"#,
+            ),
+            (r#"'\U0000dfff'"#, r#"'\U0000dfff'"#),
+            (r#"'\ud800' 'a'"#, r#"'\ud800' 'a'"#),
+            (
+                r#"f'\ud800{x}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 12), '{}{}', ('\ud800', None, ''), (_sx_variable(_sx_context, _sx_source, (9, 10), 'x'), None, ''))"#,
+            ),
+            (
+                r#"f'{x:\ud800}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 13), '{}', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), None, '\ud800'))"#,
+            ),
+            (
+                r#"f'{x:{w}\ud800}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 16), '{}', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), None, ('{}{}', _sx_variable(_sx_context, _sx_source, (6, 7), 'w'), '\ud800')))"#,
+            ),
+            (
+                r#"'\ud800' f'{x}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 15), '{}{}', ('\ud800', None, ''), (_sx_variable(_sx_context, _sx_source, (12, 13), 'x'), None, ''))"#,
+            ),
+            (
+                r#"f'''\ud800'{x}'''"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 17), '{}{}', ('''\ud800\'''', None, ''), (_sx_variable(_sx_context, _sx_source, (12, 13), 'x'), None, ''))"#,
+            ),
+            (
+                r#"f'\N{BULLET}{{\ud800}}{x}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 26), '{}{}', ('\N{BULLET}{\ud800}', None, ''), (_sx_variable(_sx_context, _sx_source, (23, 24), 'x'), None, ''))"#,
+            ),
+            (
+                r#"t'\ud800{x}'"#,
+                r#"_sx_template(_sx_context, _sx_source, (0, 12), '\ud800', _sx_interpolation(_sx_context, _sx_source, (8, 11), _sx_variable(_sx_context, _sx_source, (9, 10), 'x'), 'x', None, ''))"#,
+            ),
+            (
+                r#"t'{x:\ud800}'"#,
+                r#"_sx_template(_sx_context, _sx_source, (0, 13), _sx_interpolation(_sx_context, _sx_source, (2, 12), _sx_variable(_sx_context, _sx_source, (3, 4), 'x'), 'x', None, '\ud800'))"#,
+            ),
+            (
+                r#"t'{x:{w}\ud800}'"#,
+                r#"_sx_template(_sx_context, _sx_source, (0, 16), _sx_interpolation(_sx_context, _sx_source, (2, 15), _sx_variable(_sx_context, _sx_source, (3, 4), 'x'), 'x', None, '{}{}'.format(_sx_variable(_sx_context, _sx_source, (6, 7), 'w'), '\ud800')))"#,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn test_text_ending_in_a_backslash_keeps_it_when_written_from_source() {
+        // The f-string keeps `\{` as a backslash before the interpolation;
+        // written as its own literal, that backslash is doubled so it does
+        // not escape the closing quote.
+        _test_generated(&[(
+            r#"f'\ud800\{x}'"#,
+            r#"_sx_format(_sx_context, _sx_source, (0, 13), '{}{}', ('\ud800\\', None, ''), (_sx_variable(_sx_context, _sx_source, (10, 11), 'x'), None, ''))"#,
+        )]);
+    }
+
+    #[test]
+    fn test_self_documenting_interpolations_write_their_source_text() {
+        // `{x=}` shows the source text before the value, and the value's
+        // repr() when there is no conversion or format spec.
+        _test_generated(&[
+            (
+                "f'{x=}'",
+                "_sx_format(_sx_context, _sx_source, (0, 7), 'x={}', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), 'r', ''))",
+            ),
+            (
+                "f'{x=:>4}'",
+                "_sx_format(_sx_context, _sx_source, (0, 10), 'x={}', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), None, '>4'))",
+            ),
+            (
+                "f'{ {1:2}[1] = }'",
+                "_sx_format(_sx_context, _sx_source, (0, 17), ' {{1:2}}[1] = {}', (_sx_subscript(_sx_context, _sx_source, (4, 12), {1: 2}, 1), 'r', ''))",
+            ),
+            (
+                "t'{x=}'",
+                "_sx_template(_sx_context, _sx_source, (0, 7), 'x=', _sx_interpolation(_sx_context, _sx_source, (2, 6), _sx_variable(_sx_context, _sx_source, (3, 4), 'x'), 'x', 'r', ''))",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn test_tstring_interpolations_keep_their_expression_text() {
+        // Python stores the text between `{` and the `=`, `!`, `:` or `}`
+        // that ends the expression, with its whitespace and parentheses and
+        // without its comments.
+        _test_generated(&[
+            (
+                "t'{ x }'",
+                "_sx_template(_sx_context, _sx_source, (0, 8), _sx_interpolation(_sx_context, _sx_source, (2, 7), _sx_variable(_sx_context, _sx_source, (4, 5), 'x'), ' x ', None, ''))",
+            ),
+            (
+                "t'{ (x) }'",
+                "_sx_template(_sx_context, _sx_source, (0, 10), _sx_interpolation(_sx_context, _sx_source, (2, 9), _sx_variable(_sx_context, _sx_source, (5, 6), 'x'), ' (x) ', None, ''))",
+            ),
+            (
+                "t'{x == 1}'",
+                "_sx_template(_sx_context, _sx_source, (0, 11), _sx_interpolation(_sx_context, _sx_source, (2, 10), _sx_variable(_sx_context, _sx_source, (3, 4), 'x') == 1, 'x == 1', None, ''))",
+            ),
+            (
+                "t'{ x = }'",
+                "_sx_template(_sx_context, _sx_source, (0, 10), ' x = ', _sx_interpolation(_sx_context, _sx_source, (2, 9), _sx_variable(_sx_context, _sx_source, (4, 5), 'x'), ' x ', 'r', ''))",
+            ),
+            (
+                "t'''{x # c\n}'''",
+                "_sx_template(_sx_context, _sx_source, (0, 15), _sx_interpolation(_sx_context, _sx_source, (4, 12), _sx_variable(_sx_context, _sx_source, (5, 6), 'x'), 'x \\n', None, ''))",
+            ),
+            // A comment inside a nested string stays in that string's text.
+            (
+                "t'''{f\"\"\"{x # c\n}\"\"\"}'''",
+                "_sx_template(_sx_context, _sx_source, (0, 24), _sx_interpolation(_sx_context, _sx_source, (4, 21), _sx_format(_sx_context, _sx_source, (5, 20), '{}', (_sx_variable(_sx_context, _sx_source, (10, 11), 'x'), None, '')), 'f\"\"\"{x # c\\n}\"\"\"', None, ''))",
+            ),
+            // A backslash line continuation after the expression is part of it.
+            (
+                "t'''{x \\\n}'''",
+                "_sx_template(_sx_context, _sx_source, (0, 13), _sx_interpolation(_sx_context, _sx_source, (4, 10), _sx_variable(_sx_context, _sx_source, (5, 6), 'x'), 'x \\\\\\n', None, ''))",
+            ),
+            // A self-documenting interpolation's `x=` text drops its comments.
+            (
+                "f'''{x # c\n=}'''",
+                "_sx_format(_sx_context, _sx_source, (0, 16), 'x \\n={}', (_sx_variable(_sx_context, _sx_source, (5, 6), 'x'), 'r', ''))",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn test_literals_without_a_lone_surrogate_escape_are_written_as_before() {
+        // An escaped backslash, a raw string and a bytes literal hold no
+        // surrogate escape.
+        _test_generated(&[
+            (r#"'\\ud800'"#, r#"'\\ud800'"#),
+            (r#"r'\ud800'"#, r#"r'\ud800'"#),
+            (r#"b'\ud800'"#, r#"b'\\ud800'"#),
+            (
+                r#"rf'\ud800{x}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 13), '\\ud800{}', (_sx_variable(_sx_context, _sx_source, (10, 11), 'x'), None, ''))"#,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn test_fstring_text_keeps_its_braces_and_concatenated_literals() {
+        // The f-string becomes a `str.format` template, so a literal brace is
+        // written doubled, and an ordinary literal joined to the f-string is
+        // part of the text.
+        _test_generated(&[
+            (
+                r#"f'{{a}}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 8), '{{a}}')"#,
+            ),
+            (
+                r#"'x' f'{x}'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 10), 'x{}', (_sx_variable(_sx_context, _sx_source, (7, 8), 'x'), None, ''))"#,
+            ),
+            (
+                r#"f'{x}' 'z{'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 11), '{}z{{', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), None, ''))"#,
+            ),
+            (
+                r#"f'{x:>{w}}{{'"#,
+                r#"_sx_format(_sx_context, _sx_source, (0, 13), '{}{{', (_sx_variable(_sx_context, _sx_source, (3, 4), 'x'), None, ('>{}', _sx_variable(_sx_context, _sx_source, (7, 8), 'w'))))"#,
+            ),
+        ]);
     }
 
     // === NAMES THE GENERATED CODE USES FOR ITS OWN HELPERS ===
