@@ -49,6 +49,9 @@ jobs:
     needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
+      # One target failing, such as a brief network error in a build image, should
+      # not cancel the others. The upload job still needs every job to pass.
+      fail-fast: false
       matrix:
         platform:
           - runner: ubuntu-latest
@@ -89,6 +92,9 @@ jobs:
     needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
+      # One target failing, such as a brief network error in a build image, should
+      # not cancel the others. The upload job still needs every job to pass.
+      fail-fast: false
       matrix:
         platform:
           - runner: ubuntu-latest
@@ -125,6 +131,9 @@ jobs:
     needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
+      # One target failing, such as a brief network error in a build image, should
+      # not cancel the others. The upload job still needs every job to pass.
+      fail-fast: false
       matrix:
         platform:
           - runner: windows-latest
@@ -188,6 +197,9 @@ jobs:
     needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
+      # One target failing, such as a brief network error in a build image, should
+      # not cancel the others. The upload job still needs every job to pass.
+      fail-fast: false
       matrix:
         platform:
           - runner: macos-15-intel
