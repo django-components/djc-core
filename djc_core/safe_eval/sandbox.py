@@ -56,6 +56,7 @@ UNSAFE_ASYNC_GENERATOR_ATTRIBUTES = {"ag_code", "ag_frame"}
 _UNSAFE_BUILTIN_FUNCTION_NAMES = {
     "__build_class__": None,
     "__import__": None,
+    "__lazy_import__": None,
     "__loader__": None,
     "aiter": None,
     "anext": None,
