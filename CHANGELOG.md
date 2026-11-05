@@ -5,7 +5,7 @@
 ### Feat
 
 - Add support for Python 3.15, with wheels for the same platforms as 3.14.
-  Free-threaded wheels are Linux only. On free-threaded Python, importing
+  Free-threaded wheels are for Linux and macOS. On free-threaded Python, importing
   `djc_core` turns the GIL on and Python prints a `RuntimeWarning`.
 
 ### Refactor
