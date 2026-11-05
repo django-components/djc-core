@@ -106,7 +106,7 @@ use crate::grammar::Rule;
 /// Child value that can be either a TagValue or a Template
 ///
 /// Used in `TagValue.children` to support nested templates in template strings
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum ValueChild {
     Value(TagValue),
@@ -139,7 +139,6 @@ impl ValueChild {
     fn __eq__(&self, other: &ValueChild) -> bool {
         match (self, other) {
             (ValueChild::Value(a), ValueChild::Value(b)) => a == b,
-            _ => false,
         }
     }
 
@@ -151,7 +150,7 @@ impl ValueChild {
 }
 
 /// Top-level tag attribute, e.g. `key=my_var` or without key like `my_var|filter`
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct TagAttr {
     /// Token containing the entire attribute span (key + value with filters)
@@ -197,7 +196,7 @@ impl TagAttr {
     }
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum ValueKind {
     List,
@@ -248,7 +247,7 @@ impl ValueKind {
 }
 
 /// Metadata of a matched token with its position information
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct Token {
     /// String content of the token
@@ -378,7 +377,7 @@ impl Token {
 /// Metadata about how some piece of text will be interpreted in Python.
 ///
 /// E.g. `my_var.item_count` is a variable, while `[1, 2, 3]` is a list of int literals, etc.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct TagValue {
     /// Token containing the entire value span including filters and spread
@@ -453,7 +452,7 @@ impl TagValue {
 /// Filter applied to a value.
 ///
 /// E.g. `my_var|upper` is a filter `upper` applied to the variable `my_var`.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct TagValueFilter {
     /// Token containing the entire filter span including `|`, `:`, and argument
@@ -492,7 +491,7 @@ impl TagValueFilter {
 // #########################################################
 
 /// Represents a Django template comment `{# ... #}` or `{% comment %}...{% endcomment %}`
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct Comment {
     /// Token containing the entire comment span including `{# #}` delimiters
@@ -527,7 +526,7 @@ impl Comment {
 ///
 /// This contains the core information that every tag has: its token, name,
 /// and variable usage information.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct TagMeta {
     /// Token containing the entire tag span including delimiters (e.g., `{% %}` or `< />`)
@@ -599,7 +598,7 @@ impl TagMeta {
 ///
 /// NOTE: This does NOT contain the forloop `{% for %}` tag,
 /// which is a special tag type `ForLoopTag`.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct GenericTag {
     /// Common tag metadata (token, name, used/assigned variables)
@@ -654,7 +653,7 @@ impl GenericTag {
 
 /// Represents a for loop tag: `{% for item in items %}`
 /// This is a special tag type that cannot be self-closing and has a specific structure.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct ForLoopTag {
     /// Common tag metadata (token, name, used/assigned variables)
@@ -706,7 +705,7 @@ impl ForLoopTag {
 
 /// Represents an end tag (e.g., `{% endif %}`, `{% endfor %}`, `</slot>`)
 /// End tags cannot have attributes or be self-closing - they only contain the tag name.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct EndTag {
     /// Common tag metadata (token, name, used/assigned variables)
@@ -739,7 +738,7 @@ impl EndTag {
 }
 
 /// Represents a template tag - either a generic tag, a for loop tag, or an end tag
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum Tag {
     Generic(GenericTag),
@@ -864,7 +863,7 @@ impl Tag {
 ///           1.3.1 literal list or dict - Wrap in parentheses until the closing `]` or `}` ✅
 ///           1.3.2 variable - Wrap in parentheses until whitespace or the end of the tag ✅
 ///           1.3.3 other - Wrap in parentheses until whitespace or the end of the tag ✅
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TemplateVersion {
     V1,

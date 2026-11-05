@@ -16,7 +16,14 @@ use crate::py_template_parser::{compile_tag_attrs, compile_value, parse_tag};
 
 /// Singular Python API that brings togther all the other Rust crates.
 /// Each crate is exposed as a submodule.
-#[pymodule]
+// Importing this module turns the GIL on in free-threaded Python, and Python
+// prints a `RuntimeWarning`. `PYTHON_GIL=0` or `-X gil=0` keeps it off. We ask
+// for the GIL because a `ParserConfig` shared between threads raises
+// "Already borrowed" without it when `set_tag()` runs while `parse_tag()`
+// copies the config, and the Ruff crates have not been checked without it.
+// Stating this here also stops a PyO3 upgrade from changing the default
+// silently.
+#[pymodule(gil_used = true)]
 fn djc_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // HTML transformer
     let html_transformer = PyModule::new(m.py(), "html_transformer")?;
