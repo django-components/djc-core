@@ -51,8 +51,9 @@ pub fn compile_tag_attrs(attributes: &[TagAttr]) -> Result<String, CompileError>
             // multiple kwargs with the same key.
             let value_str = compile_value(&attr.value)?;
             body.push_str(&format!(
-                "kwargs.append(('{}', {}))\n",
-                key.content, value_str
+                "kwargs.append(({}, {}))\n",
+                python_string_literal(&key.content, '\''),
+                value_str
             ));
             // Spreads have to be handled at runtime. But before we come across a spread,
             // we can check solely at compile-time whether there are any args after kwargs,
@@ -128,6 +129,31 @@ fn escape_and_wrap_triple_quotes(content: &str) -> String {
     format!("\"\"\"{}\"\"\"", escaped)
 }
 
+/// Write `value` as a single-line Python string literal in the given quote.
+///
+/// The tag's text ends up inside generated Python source, so every character
+/// that could end or change the literal is escaped here, whatever the grammar
+/// allows: a backslash, which would otherwise escape the closing quote, the
+/// quote itself, and line breaks.
+fn python_string_literal(value: &str, quote: char) -> String {
+    let mut literal = String::with_capacity(value.len() + 2);
+    literal.push(quote);
+    for character in value.chars() {
+        match character {
+            '\\' => literal.push_str("\\\\"),
+            '\n' => literal.push_str("\\n"),
+            '\r' => literal.push_str("\\r"),
+            _ if character == quote => {
+                literal.push('\\');
+                literal.push(character);
+            }
+            _ => literal.push(character),
+        }
+    }
+    literal.push(quote);
+    literal
+}
+
 pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
     // Helper to format token tuple: (start_index, end_index)
     let token_tuple = format!("({}, {})", value.token.start_index, value.token.end_index);
@@ -145,12 +171,10 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
                 // No surrounding quotes, emit as-is
                 return Ok(content.to_string());
             };
-            // Escape literal newlines so the string stays a valid single-line Python literal
-            let escaped = inner
-                .replace('\\', "\\\\")
-                .replace('\n', "\\n")
-                .replace('\r', "\\r");
-            Ok(format!("{}{}{}", quote_char, escaped, quote_char))
+            // The grammar lets a string hold its own quote as `\"` or `\'`, which
+            // means the quote. Every other backslash stands for itself.
+            let unescaped = inner.replace(&format!("\\{quote_char}"), &quote_char.to_string());
+            Ok(python_string_literal(&unescaped, quote_char))
         }
         ValueKind::Variable => {
             let wrapped = escape_and_wrap_triple_quotes(&value.value.content);

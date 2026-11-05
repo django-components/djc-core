@@ -1850,6 +1850,33 @@ class TestString:
         assert args == []
         assert kwargs == [("key", "on click\n    set x to 1")]
 
+    @pytest.mark.parametrize(
+        ("tag_value", "expected"),
+        [
+            (r'''"say \"hi\""''', 'say "hi"'),
+            (r'''"\"quoted\""''', '"quoted"'),
+            (r"""'it\'s'""", "it's"),
+            # The other quote and every other backslash stand for themselves.
+            (r"""'say "hi"'""", 'say "hi"'),
+            (r'''"it\'s"''', r"it\'s"),
+            (r'''"a\nb"''', r"a\nb"),
+            (r'''"a\\b"''', r"a\\b"),
+        ],
+    )
+    def test_string_round_trips(self, tag_value, expected):
+        tag_content = "{% component key=" + tag_value + " %}"
+        args, kwargs = _simple_compile_tag(parse_tag(tag_content), tag_content)({})
+
+        assert args == []
+        assert kwargs == [("key", expected)]
+
+    def test_key_with_a_backslash_stays_a_string(self):
+        tag_content = "{% component key\\=1 other=2 %}"
+        args, kwargs = _simple_compile_tag(parse_tag(tag_content), tag_content)({})
+
+        assert args == []
+        assert kwargs == [("key\\", 1), ("other", 2)]
+
     def test_string_with_filter(self):
         tag_content = "{% component 'hello'|upper %}"
         tag = parse_tag(tag_content)

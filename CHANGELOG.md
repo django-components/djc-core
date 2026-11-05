@@ -18,6 +18,8 @@
   interpolation's `expression` holds its source text.
 - An expression nested too deeply now raises `SyntaxError` instead of crashing
   the process.
+- A tag string can now hold its own quote as `\"` or `\'`, which used to raise
+  `SyntaxError`, and a tag key can end in a backslash.
 
 ### Refactor
 

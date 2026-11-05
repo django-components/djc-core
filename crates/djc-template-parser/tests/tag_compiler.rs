@@ -277,6 +277,27 @@ mod tests {
     }
 
     #[test]
+    fn test_string_holding_its_own_quote() {
+        // `\"` and `\'` mean the quote, so each is written escaped in the literal.
+        assert_compile_tag_attrs(
+            r#"{% my_tag key="say \"hi\"" / %}"#,
+            "def compiled_func(context):\n    args = []\n    kwargs = []\n    kwargs.append(('key', \"say \\\"hi\\\"\"))\n    return args, kwargs",
+        );
+        assert_compile_tag_attrs(
+            r"{% my_tag key='it\'s' / %}",
+            "def compiled_func(context):\n    args = []\n    kwargs = []\n    kwargs.append(('key', 'it\\'s'))\n    return args, kwargs",
+        );
+    }
+
+    #[test]
+    fn test_key_with_a_backslash_stays_a_string() {
+        assert_compile_tag_attrs(
+            r"{% my_tag key\=1 / %}",
+            "def compiled_func(context):\n    args = []\n    kwargs = []\n    kwargs.append(('key\\\\', 1))\n    return args, kwargs",
+        );
+    }
+
+    #[test]
     fn test_multiline_template_string() {
         // Test multiline template string (contains {{ }}) - should use triple quotes
         let input = r#"{% my_tag key="{{ var1 }}
