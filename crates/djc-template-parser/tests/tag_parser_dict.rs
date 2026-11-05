@@ -1763,7 +1763,12 @@ mod tests {
                             ValueChild::Value(plain_string_value(r#""key1""#, 24, 2, 13, None)),
                             ValueChild::Value(plain_string_value(r#""value1""#, 32, 2, 21, None)),
                             ValueChild::Value(TagValue {
-                                token: token(r#"**{# comment after spread #}{"key2": "value2"}"#, 81, 3, 40),
+                                token: token(
+                                    r#"**{# comment after spread #}{"key2": "value2"}"#,
+                                    81,
+                                    3,
+                                    40
+                                ),
                                 value: token(r#"{"key2": "value2"}"#, 109, 3, 68),
                                 children: vec![
                                     ValueChild::Value(plain_string_value(

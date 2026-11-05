@@ -4,9 +4,7 @@ mod common;
 mod tests {
     use std::vec;
 
-    use djc_template_parser::ast::{
-        ForLoopTag, Tag, TagMeta, TagValue, TagValueFilter, ValueKind,
-    };
+    use djc_template_parser::ast::{ForLoopTag, Tag, TagMeta, TagValue, TagValueFilter, ValueKind};
 
     use super::common::{plain_parse_tag_v1, plain_variable_value, token};
 
@@ -100,7 +98,10 @@ mod tests {
                 meta: TagMeta {
                     token: token("{% for item in (items + other_items) %}", 0, 1, 1),
                     name: token("for", 3, 1, 4),
-                    used_variables: vec![token("items", 16, 1, 17), token("other_items", 24, 1, 25),],
+                    used_variables: vec![
+                        token("items", 16, 1, 17),
+                        token("other_items", 24, 1, 25),
+                    ],
                     assigned_variables: vec![],
                 },
                 targets: vec![token("item", 7, 1, 8)],
@@ -111,7 +112,10 @@ mod tests {
                     kind: ValueKind::PythonExpr,
                     spread: None,
                     filters: vec![],
-                    used_variables: vec![token("items", 16, 1, 17), token("other_items", 24, 1, 25),],
+                    used_variables: vec![
+                        token("items", 16, 1, 17),
+                        token("other_items", 24, 1, 25),
+                    ],
                     assigned_variables: vec![],
                 },
             })
