@@ -1,5 +1,23 @@
 # Release notes
 
+## v1.4.0
+
+### Feat
+
+- Add support for Python 3.15, with wheels for the same platforms as 3.14.
+  Free-threaded wheels are Linux only. On free-threaded Python, importing
+  `djc_core` turns the GIL on and Python prints a `RuntimeWarning`.
+
+### Refactor
+
+- Upgrade the Rust dependencies, including PyO3 to 0.30.1 and quick-xml to
+  0.42.0. `set_html_attributes()` returns the same HTML as before for ordinary
+  pages. A DOCTYPE with an unmatched quote or `[` now raises `ValueError`, and
+  a `>` inside a quoted DOCTYPE string no longer ends the DOCTYPE. Some error
+  messages are worded differently, including `TypeError` messages for wrong
+  argument types.
+- Wheels no longer include debug info, so Linux wheels are much smaller.
+
 ## v1.3.1
 
 ### Fix
