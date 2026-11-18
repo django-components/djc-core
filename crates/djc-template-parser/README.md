@@ -298,7 +298,7 @@ limits, a tag parses and compiles to Python source on a thread with as little
 as 128 KiB of stack, and its attributes can be read from Python there: the
 code asks for more stack when it needs it. On such a thread CPython's own
 compiler may raise `MemoryError` for the deepest filter arguments, and
-`repr()` of the deepest values needs about 96 KiB. `compile_tag()` refuses an
+`repr()` of the deepest values needs up to about 100 KiB. `compile_tag()` refuses an
 AST built by hand that nests more than 64 levels. The checks live in
 `src/nesting.rs`.
 

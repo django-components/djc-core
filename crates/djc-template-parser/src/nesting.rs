@@ -56,26 +56,32 @@ pub const MAX_NESTING: usize = 64;
 ///
 /// It bounds the stack `with_enough_stack` reserves: about 400 MiB of address
 /// space at the limit in a release build and 3 GiB in a debug build, of
-/// which only the pages the grammar actually reaches are used.
+/// which only the pages the grammar actually reaches are used. On Windows,
+/// `stacker` creates that stack as a fiber (a second stack on the same
+/// thread), and Windows counts its whole size against the system's commit
+/// limit (memory plus page file) until the parse ends. When Windows cannot
+/// give that much, `stacker` panics, which Python sees as `PanicException`.
 pub const MAX_BRACKETS: usize = 100_000;
 
 /// Stack for a tag with no brackets, with room for the error path.
 const STACK_BASE: usize = 256 * 1024;
 
-/// Stack the grammar needs for each level it opens. Measured on macOS arm64
-/// at up to 1.3 KB per level in a release build (plain lists) and 13 KB in a
-/// debug build (list items with a filter argument), then rounded up to at
-/// least twice that. The Rust tests run debug builds.
+/// Stack the grammar needs for each level it opens. Measured on macOS arm64,
+/// Linux x86-64 and Windows x86-64 at up to 1.6 KB per level in a release
+/// build and 15 KB in a debug build (lists or dicts whose items have filter
+/// arguments, on Windows), then rounded up to at least twice that. The Rust
+/// tests run debug builds.
 #[cfg(not(debug_assertions))]
 const GRAMMAR_STACK_PER_BRACKET: usize = 4 * 1024;
 #[cfg(debug_assertions)]
 const GRAMMAR_STACK_PER_BRACKET: usize = 32 * 1024;
 
 /// Stack the grammar, the AST builder and the compiler need for each level
-/// of the finished tree. Parsing a tag 64 levels deep needed up to 8.6 KB per
-/// level in a release build and 62 KB in a debug build (a dict value with a
-/// filter argument, measured on macOS arm64); compiling it needed no more.
-/// Rounded up to at least twice that.
+/// of the finished tree. Measured on macOS arm64, Linux x86-64 and Windows
+/// x86-64 with a dict value that has a filter argument, parsing a tag 64
+/// levels deep needed up to 9.4 KB per level in a release build (Windows)
+/// and 64 KB in a debug build (macOS). Compiling it needed no more. Rounded
+/// up to at least twice that.
 #[cfg(not(debug_assertions))]
 const AST_STACK_PER_LEVEL: usize = 24 * 1024;
 #[cfg(debug_assertions)]
@@ -257,7 +263,10 @@ pub(crate) fn check_value_depth(value: &TagValue) -> Result<usize, CompileError>
     Ok(deepest)
 }
 
-/// Stack one level of copying a tag value may use, with a wide margin.
+/// Stack one level of copying a tag value may use, with a wide margin. One
+/// level needed up to 2.8 KB in a release build (Windows) and 5.8 KB in a
+/// debug build (macOS), measured on macOS arm64, Linux x86-64 and Windows
+/// x86-64.
 const ONE_LEVEL_RED_ZONE: usize = 64 * 1024;
 
 /// The size of each new segment for copying, which holds many levels.

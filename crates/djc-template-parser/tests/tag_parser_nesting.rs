@@ -29,13 +29,13 @@ fn nested((open, inner, close): (&str, &str, &str), levels: usize) -> String {
     )
 }
 
-fn on_stack(stack: usize, check: impl FnOnce() + Send + 'static) {
+fn on_stack<T: Send + 'static>(stack: usize, check: impl FnOnce() -> T + Send + 'static) -> T {
     std::thread::Builder::new()
         .stack_size(stack)
         .spawn(check)
         .unwrap()
         .join()
-        .unwrap();
+        .unwrap()
 }
 
 fn assert_too_deep(result: Result<Tag, ParseError>, tag: &str) {
@@ -56,6 +56,11 @@ fn the_deepest_accepted_tag_parses_and_compiles_on_a_small_thread() {
             match parse_tag(&tag, None) {
                 Ok(Tag::Generic(generic)) => {
                     compile_tag_attrs(&generic.attrs).expect(&tag);
+                    // Comparing and freeing a value walk it one call per
+                    // level with no stack check. At 64 levels that stays
+                    // well within this thread, in debug builds too.
+                    let copy = generic.attrs.clone();
+                    assert_eq!(copy, generic.attrs, "{tag}");
                 }
                 Ok(_) => panic!("{tag}: not a generic tag"),
                 Err(error) => {
@@ -162,16 +167,26 @@ fn the_check_after_parsing_counts_parentheses_inside_an_expression() {
 #[test]
 fn the_deepest_accepted_value_can_be_copied_on_a_tiny_thread() {
     // Python's attribute getters copy the value on the calling thread, one
-    // call per level. A 64 KiB stack is far smaller than any default.
-    // 64 nested `(` are refused by safe_eval, so that shape is left out.
+    // call per level, and the copy checks the stack at each level. A 64 KiB
+    // stack is far smaller than any default. On Windows only about 33 KiB
+    // of it is left when the thread starts: Rust reserves 20 KiB of each
+    // thread it starts for its stack overflow handler, and `stacker` also
+    // leaves out the guard pages below that. 64 nested `(` are refused by
+    // safe_eval, so that shape is left out.
     for shape in SHAPES.into_iter().filter(|shape| shape.0 != "(") {
         let tag = nested(shape, MAX_NESTING);
         let Ok(Tag::Generic(generic)) = parse_tag(&tag, None) else {
             panic!("{tag}: not parsed as a generic tag");
         };
-        on_stack(64 * 1024, move || {
-            let copy = generic.attrs.clone();
-            assert_eq!(copy, generic.attrs);
+        let original = generic.attrs;
+        // Only the copy runs on the tiny thread. Comparing and freeing the
+        // values have no stack check (in a debug build on Windows, comparing
+        // needs about 79 KB and freeing about 57 KB), so both happen back on
+        // this thread. The 256 KiB test above checks them on a small thread.
+        let (copy, original) = on_stack(64 * 1024, move || {
+            let copy = original.clone();
+            (copy, original)
         });
+        assert_eq!(copy, original, "{tag}");
     }
 }
