@@ -10,12 +10,15 @@ It checks every variable, attribute, item, and call that the expression text wri
 It refuses:
 
 - Names that start with `_`: variables read from the context, attributes (so no
-  `obj.__class__`), and string item keys (`data["_key"]`). A lambda parameter or
+  `obj.__class__`), string item keys (`data["_key"]`), and keyword argument names in a
+  call, written as `f(_x=1)` or passed through `f(**mapping)`. A lambda parameter or
   comprehension variable may start with `_`, because it holds only what the expression
   gave it.
 - Calls to functions that are dangerous by themselves, such as `eval`, `getattr`, and `open`.
   The check compares the function, not its name, so a function passed in under another
-  name, or wrapped in `functools.partial`, is refused too.
+  name is refused too. So is an object that passes the call on to one of them: a
+  `functools.partial`, a bound method, a function's `__call__`, or an object whose class
+  `__call__` is one of them.
 - Text formatting that follows paths written inside the string: `format` and `format_map`
   of any string type (`str`, its subclasses such as `markupsafe.Markup`, and
   `collections.UserString`), every method of a `string.Formatter`, and building an
@@ -85,7 +88,7 @@ import operator
 import string
 import types
 from collections import UserString
-from typing import Any, Callable, Dict, Optional, Set, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -312,6 +315,16 @@ def _formatting_method_message(obj: Any) -> Optional[str]:
     return None
 
 
+#: How many objects behind the called one `is_safe_callable` follows before it refuses the
+#: call. A real callable adds one or two: a bound method and its function, a partial and the
+#: function inside it, an object and its class `__call__`.
+MAX_CALL_STEPS = 32
+
+_CALL_STEPS_MESSAGE = (
+    f"It passes the call on through more than {MAX_CALL_STEPS} other objects, too many to check."
+)
+
+
 def is_safe_callable(obj: Any) -> Tuple[bool, Optional[str]]:
     """
     Check if an object is safely callable.
@@ -330,61 +343,169 @@ def is_safe_callable(obj: Any) -> Tuple[bool, Optional[str]]:
     - Every method of a `string.Formatter` instance
     - `operator.attrgetter` and `operator.methodcaller`, which would let the template name
       the attribute to read
-    - A `functools.partial` of any of the above
+    - Anything that passes the call on to one of the above without code of its own: a
+      `functools.partial`, a bound method, the `__call__` of a refused function, or an
+      object whose class `__call__` is refused
+    - Anything that passes the call on through more than `MAX_CALL_STEPS` objects
+
+    The check does not look inside the code of a function you pass in. A function that calls
+    a refused function in its own body, such as a `functools.wraps` wrapper, is not refused.
     """
-    # Check for bound methods (e.g., "string".format())
-    # Handle both regular methods (types.MethodType) and built-in methods (builtin_function_or_method)
-    underlying_func = None
-    if isinstance(obj, types.MethodType):
-        # Regular Python method - has __func__ attribute
-        underlying_func = obj.__func__
-    elif (
-        hasattr(obj, "__self__")
-        and hasattr(obj, "__name__")
-        and not hasattr(obj, "__func__")
-    ):
-        # Built-in method descriptor (e.g., str.format, str.format_map)
-        # These are bound methods that don't have __func__, but we can get the original descriptor
-        try:
-            underlying_func = getattr(type(obj.__self__), obj.__name__)
-        except (AttributeError, TypeError):
-            pass
+    # Each object is checked, then the objects that calling it would call in turn. `seen` is
+    # keyed by `id()` and holds each object, so an object made during the check (a bound
+    # `__call__`) can't free its id for another one and be skipped.
+    seen: Dict[int, Any] = {}
+    pending = [obj]
+    while pending:
+        step = pending.pop()
+        # An object that passes the call back to itself adds nothing new to check.
+        if id(step) in seen:
+            continue
+        seen[id(step)] = step
+        # Refuse rather than stop looking, so a long chain can't hide a refused function at
+        # its end. `seen` holds `obj` itself as well as the objects behind it.
+        if len(seen) > MAX_CALL_STEPS + 1:
+            return (False, _CALL_STEPS_MESSAGE)
 
-    if underlying_func is not None:
-        # Check marks on inner function (decorated with @unsafe or alters_data)
-        if getattr(underlying_func, "unsafe_callable", False) or getattr(
-            underlying_func, "alters_data", False
-        ):
-            return (False, None)
-        # Check if the underlying function is in our unsafe dictionaries
-        if underlying_func in UNSAFE_FUNCTIONS:
-            return (False, UNSAFE_FUNCTIONS[underlying_func])
-        if underlying_func in UNSAFE_BUILTIN_FUNCTIONS:
-            return (False, UNSAFE_BUILTIN_FUNCTIONS[underlying_func])
+        refusal = _check_one_callable(step)
+        if refusal is not None:
+            return refusal
+        pending.extend(_call_targets(step))
 
-    # Check marks on the outer function (decorated with @unsafe or alters_data)
+    return (True, None)
+
+
+def _check_one_callable(obj: Any) -> Optional[Tuple[bool, Optional[str]]]:
+    """Return the refusal for `obj` by itself, or None when nothing about it is refused."""
+    # Marks set with `@unsafe` or Django's `alters_data`. A bound method shows the marks of
+    # its function, and the function is checked as its own step too.
     if getattr(obj, "unsafe_callable", False) or getattr(obj, "alters_data", False):
         return (False, None)
 
-    # Check identity for unbound functions
-    if obj in UNSAFE_FUNCTIONS:
-        return (False, UNSAFE_FUNCTIONS[obj])
-    if obj in UNSAFE_BUILTIN_FUNCTIONS:
-        return (False, UNSAFE_BUILTIN_FUNCTIONS[obj])
+    # Identity of the listed functions, such as `eval` or `str.format`.
+    listed = _listed_refusal(obj)
+    if listed is not None:
+        return listed
 
     # Check the type the method is bound to. The identity checks above know `str.format`
     # but not the `format` that a subclass such as `Markup` defines for itself.
     message = _formatting_method_message(obj)
     if message is not None:
         return (False, message)
+    return None
 
-    # A partial calls its wrapped function with some arguments filled in, so it is as
-    # safe as that function. Without this, `partial(getattr, obj)` would be a way to call
-    # a refused function under another name.
+
+def _listed_refusal(obj: Any) -> Optional[Tuple[bool, Optional[str]]]:
+    """Return the refusal if `obj` is in `UNSAFE_FUNCTIONS` or `UNSAFE_BUILTIN_FUNCTIONS`."""
+    # The tables are dictionaries, so a lookup hashes `obj`, and that raises `TypeError` for
+    # an object that can't be hashed, such as an instance of a class that sets `__eq__` but
+    # not `__hash__`. Every key in the tables can be hashed, so such an object is none of
+    # them: it is not listed, and the other checks decide about it.
+    try:
+        hash(obj)
+    except TypeError:
+        return None
+    if obj in UNSAFE_FUNCTIONS:
+        return (False, UNSAFE_FUNCTIONS[obj])
+    if obj in UNSAFE_BUILTIN_FUNCTIONS:
+        return (False, UNSAFE_BUILTIN_FUNCTIONS[obj])
+    return None
+
+
+def _call_targets(obj: Any) -> List[Any]:
+    """
+    Return the objects that calling `obj` passes the call on to, without code of its own.
+
+    Python's own call machinery does this for a partial, a bound method and an object with a
+    class `__call__`. A function's body is not followed.
+    """
+    targets: List[Any] = []
+
+    # A partial calls its wrapped function with some arguments filled in, so it is as safe
+    # as that function. Without this, `partial(getattr, obj)` would be a way to call a
+    # refused function under another name.
     if isinstance(obj, functools.partial):
-        return is_safe_callable(obj.func)
+        targets.append(obj.func)
+    # A `partialmethod` in a class does the same once bound. For a function that does not
+    # bind, such as `getattr`, binding gives a helper whose body calls the function, and
+    # the check does not read function bodies, so the wrapped function is checked here.
+    if isinstance(obj, functools.partialmethod):
+        targets.append(obj.func)
 
-    return (True, None)
+    # A bound method calls its function with the object first. A Python method keeps the
+    # function in `__func__`.
+    if isinstance(obj, types.MethodType):
+        targets.append(obj.__func__)
+    elif hasattr(obj, "__self__") and hasattr(obj, "__name__") and not hasattr(obj, "__func__"):
+        # A built-in bound method, such as `"text".format`, has no `__func__`, but the
+        # function it runs is the one its class has under the same name (`str.format`).
+        # A built-in function such as `len` is bound to its module, whose class has
+        # nothing to find, so it skips the lookup.
+        if not isinstance(obj.__self__, types.ModuleType):
+            try:
+                targets.append(getattr(type(obj.__self__), obj.__name__))
+            except (AttributeError, TypeError):
+                pass
+
+    # `function.__call__` belongs to `function` and calls it. It is neither of the above:
+    # for a built-in function it is a `method-wrapper`, and its class lookup above finds
+    # only the generic `__call__` of the function type.
+    if getattr(obj, "__name__", None) == "__call__":
+        owner = getattr(obj, "__self__", None)
+        if owner is not None:
+            targets.append(owner)
+
+    # Calling an object runs the `__call__` that Python finds on its class and binds to the
+    # object, which may be a refused function, such as `__call__ = staticmethod(getattr)`.
+    # A built-in type's own `__call__` is a C-level wrapper (`WrapperDescriptorType`) that
+    # only calls the object, so it adds nothing to check.
+    class_call = None if type(obj) in _BUILTIN_CALL_TYPES else _find_on_type(obj, "__call__")
+    if class_call is not None and not isinstance(class_call, types.WrapperDescriptorType):
+        targets.append(class_call)
+        # Binding can give another object, as with `staticmethod`, `functools.partialmethod`
+        # or a property. A plain function only becomes a bound method of itself, so it is
+        # not bound here.
+        if not isinstance(class_call, types.FunctionType):
+            bind = _find_on_type(class_call, "__get__")
+            if bind is not None:
+                targets.append(bind(class_call, obj, type(obj)))
+    return targets
+
+
+# Built-in types whose `__call__` is always the C-level one. Their attributes can't be
+# changed, so `_call_targets` skips the class lookup for them, which is most calls.
+_BUILTIN_CALL_TYPES = frozenset(
+    {
+        types.FunctionType,
+        types.BuiltinFunctionType,
+        types.MethodType,
+        types.MethodWrapperType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        type,
+        functools.partial,
+    }
+)
+
+# The descriptors that `type` itself uses for `__mro__` and `__dict__`, so that a metaclass
+# can't change what `_find_on_type` reads.
+_TYPE_MRO = type.__dict__["__mro__"]
+_TYPE_DICT = type.__dict__["__dict__"]
+
+
+def _find_on_type(obj: Any, name: str) -> Any:
+    """
+    Look `name` up the way Python does when it runs a special method such as `__call__`.
+
+    Python reads the `__dict__` of each class in the method resolution order of `type(obj)`.
+    Reading `type(obj).__call__` instead would go through the metaclass and the descriptor,
+    which can return a different object.
+    """
+    for klass in _TYPE_MRO.__get__(type(obj)):
+        namespace = _TYPE_DICT.__get__(klass)
+        if name in namespace:
+            return namespace[name]
+    return None
 
 
 def is_safe_variable(var_name: str) -> bool:

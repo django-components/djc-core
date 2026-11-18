@@ -130,6 +130,7 @@ def safe_eval(
             __source: str,
             __token: Tuple[int, int],
             func: Callable,
+            /,
             *args: Any,
             **kwargs: Any,
         ) -> Any:
@@ -319,13 +320,15 @@ def subscript(
     return obj[key]
 
 
-# NOTE: Our internal args are prefixed with `__` to avoid keyword argument conflicts with the original input.
+# NOTE: The helper's own arguments are positional-only (`/`), so that every keyword the
+#       expression passes, such as `func=`, reaches the called function.
 @error_context("call")
 def call(
     __context: Mapping[str, Any],
     __source: str,
     __token: Tuple[int, int],
     func: Callable,
+    /,
     *args: Any,
     **kwargs: Any,
 ) -> Any:
@@ -336,6 +339,15 @@ def call(
         if replacement_message:
             error_msg += f". {replacement_message}"
         raise SecurityError(error_msg)
+    # A keyword that starts with `_` reaches a parameter the function keeps for itself. Each
+    # method of a Django lazy string takes `__method_name`, which picks the method that runs, so
+    # `text.upper(__method_name="format")` would run the refused `format`. `name=` and
+    # `**mapping` both arrive here, so one check covers both.
+    for name in kwargs:
+        if name.startswith("_"):
+            raise SecurityError(
+                f"keyword argument '{name}' is unsafe. Keyword names that start with '_' are not allowed."
+            )
     return func(*args, **kwargs)
 
 

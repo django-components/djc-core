@@ -131,7 +131,8 @@ def error_context(func_name: str) -> Callable[[T], T]:
     Decorator that wraps functions to add error context reporting.
 
     Extracts token tuple (start_index, end_index) from the third positional argument,
-    and on error, formats the error with underlined source code.
+    and on error, formats the error with underlined source code. An error that another
+    `error_context` function has formatted already passes through unchanged.
     """
 
     def decorator(func: T) -> T:
@@ -146,8 +147,12 @@ def error_context(func_name: str) -> Callable[[T], T]:
                 # On success return result normally
                 return func(*args, **kwargs)
             except Exception as e:
-                # On error, modify the error message to include the source code context
-                _format_error_with_context(e, source, start_index, end_index, func_name)
+                # An inner helper may have added its context already: a `safe_eval()` hook wraps
+                # the default check, and a lambda in the expression runs inside the call that
+                # calls it. Keep the innermost message, which points at the exact place, rather
+                # than printing the prefix and the source excerpt a second time.
+                if not getattr(e, "_error_processed", False):
+                    _format_error_with_context(e, source, start_index, end_index, func_name)
                 raise
 
         return wrapper

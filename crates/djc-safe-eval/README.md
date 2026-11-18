@@ -233,8 +233,9 @@ result = compiled({"my_var": 5})
 
 The sandbox refuses the cases below. Each raises `SecurityError` when the expression runs, except a reserved name, which raises `SyntaxError` when it compiles:
 
-- **Unsafe builtins**: `eval`, `exec`, `compile`, `open`, `input`, etc., even if passed under different names.
+- **Unsafe builtins**: `eval`, `exec`, `compile`, `open`, `input`, etc., even if passed under different names, or through an object that passes the call on to them, such as a `functools.partial`, a bound method, or an object whose class `__call__` is one of them.
 - **Private attributes**: Starting with `_`
+- **Private keyword arguments**: A keyword argument name that starts with `_`, written as `f(_x=1)` or passed through `f(**mapping)`
 - **Dunder attributes**: Internal Python attributes like `__class__`, `__dict__`, `mro`, etc.
 - **Unsafe methods**:
   - Functions decorated with `@unsafe`
