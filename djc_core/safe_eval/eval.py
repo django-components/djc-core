@@ -320,8 +320,8 @@ def subscript(
     return obj[key]
 
 
-# NOTE: The helper's own arguments are positional-only (`/`), so that every keyword the
-#       expression passes, such as `func=`, reaches the called function.
+# NOTE: The helper's own arguments are positional-only (`/`), so that a keyword such as
+#       `func=` never fills one of the helper's own arguments.
 @error_context("call")
 def call(
     __context: Mapping[str, Any],
@@ -343,11 +343,22 @@ def call(
     # method of a Django lazy string takes `__method_name`, which picks the method that runs, so
     # `text.upper(__method_name="format")` would run the refused `format`. `name=` and
     # `**mapping` both arrive here, so one check covers both.
-    for name in kwargs:
-        if name.startswith("_"):
-            raise SecurityError(
-                f"keyword argument '{name}' is unsafe. Keyword names that start with '_' are not allowed."
-            )
+    if kwargs:
+        # A key from a `**mapping` can be a `str` subclass whose own `startswith` or `__eq__`
+        # lies about its text, and Python may bind it to a parameter by `__eq__`. Plain copies
+        # of the keys are checked and passed on, so the check and the call see the same names.
+        if any(type(name) is not str for name in kwargs):
+            plain_kwargs = {str.__str__(name): value for name, value in kwargs.items()}
+            # Two keys with the same text would collapse into one. Python refuses that.
+            if len(plain_kwargs) != len(kwargs):
+                raise TypeError("got multiple values for the same keyword argument")
+            kwargs = plain_kwargs
+        for name in kwargs:
+            if name.startswith("_"):
+                raise SecurityError(
+                    f"keyword argument {name!r} is unsafe. Keyword names that start with '_' are not "
+                    "allowed; pass the value under another name."
+                )
     return func(*args, **kwargs)
 
 

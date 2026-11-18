@@ -16,9 +16,11 @@ It refuses:
   gave it.
 - Calls to functions that are dangerous by themselves, such as `eval`, `getattr`, and `open`.
   The check compares the function, not its name, so a function passed in under another
-  name is refused too. So is an object that passes the call on to one of them: a
-  `functools.partial`, a bound method, a function's `__call__`, or an object whose class
-  `__call__` is one of them.
+  name is refused too. So is one of these objects when it passes the call on to one of them:
+  a `functools.partial`, a `staticmethod`, a `functools.lru_cache()` wrapper, a
+  `types.GenericAlias`, a bound method, a function's `__call__`, or an object whose class
+  `__call__` is one of them. A weak proxy of a callable is refused, because it hides what it
+  calls.
 - Text formatting that follows paths written inside the string: `format` and `format_map`
   of any string type (`str`, its subclasses such as `markupsafe.Markup`, and
   `collections.UserString`), every method of a `string.Formatter`, and building an
@@ -87,6 +89,7 @@ import functools
 import operator
 import string
 import types
+import weakref
 from collections import UserString
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
@@ -316,13 +319,26 @@ def _formatting_method_message(obj: Any) -> Optional[str]:
 
 
 #: How many objects behind the called one `is_safe_callable` follows before it refuses the
-#: call. A real callable adds one or two: a bound method and its function, a partial and the
-#: function inside it, an object and its class `__call__`.
+#: call. An ordinary callable adds one or two steps: a bound method and its function, a
+#: partial and the function inside it, an object and its class `__call__`.
 MAX_CALL_STEPS = 32
 
 _CALL_STEPS_MESSAGE = (
-    f"It passes the call on through more than {MAX_CALL_STEPS} other objects, too many to check."
+    f"It passes the call on through more than {MAX_CALL_STEPS} other objects, too many to check. "
+    "Pass the function itself instead."
 )
+
+# A weak proxy forwards the call, and every attribute read, to an object that it does not
+# expose, so the check can't see what it would call. It can't be hashed but compares equal to
+# the object it stands for, so the table lookup would miss a listed function behind it.
+_WEAK_PROXY_MESSAGE = "A weak proxy hides the function it calls. Pass the function itself instead."
+
+# `functools.lru_cache()` and `functools.cache()` return this C-level type. It calls the
+# function in `__wrapped__` with no code of its own, so the check follows it like a partial.
+_LRU_CACHE_WRAPPER_TYPE = type(functools.lru_cache(maxsize=None)(len))
+
+# The slot that holds what a `types.GenericAlias` such as `list[int]` calls.
+_GENERIC_ALIAS_ORIGIN = types.GenericAlias.__dict__["__origin__"]
 
 
 def is_safe_callable(obj: Any) -> Tuple[bool, Optional[str]]:
@@ -343,9 +359,12 @@ def is_safe_callable(obj: Any) -> Tuple[bool, Optional[str]]:
     - Every method of a `string.Formatter` instance
     - `operator.attrgetter` and `operator.methodcaller`, which would let the template name
       the attribute to read
-    - Anything that passes the call on to one of the above without code of its own: a
-      `functools.partial`, a bound method, the `__call__` of a refused function, or an
-      object whose class `__call__` is refused
+    - One of these objects when it passes the call on to one of the above: a
+      `functools.partial` or `functools.partialmethod`, a `staticmethod`, a
+      `functools.lru_cache()` wrapper, a `types.GenericAlias` such as `list[int]`, a bound
+      method, the `__call__` of a refused function, or an object whose class `__call__` is
+      refused
+    - A weak proxy (`weakref.proxy()`) of a callable, which hides what it calls
     - Anything that passes the call on through more than `MAX_CALL_STEPS` objects
 
     The check does not look inside the code of a function you pass in. A function that calls
@@ -382,6 +401,9 @@ def _check_one_callable(obj: Any) -> Optional[Tuple[bool, Optional[str]]]:
     if getattr(obj, "unsafe_callable", False) or getattr(obj, "alters_data", False):
         return (False, None)
 
+    if isinstance(obj, weakref.CallableProxyType):
+        return (False, _WEAK_PROXY_MESSAGE)
+
     # Identity of the listed functions, such as `eval` or `str.format`.
     listed = _listed_refusal(obj)
     if listed is not None:
@@ -399,8 +421,9 @@ def _listed_refusal(obj: Any) -> Optional[Tuple[bool, Optional[str]]]:
     """Return the refusal if `obj` is in `UNSAFE_FUNCTIONS` or `UNSAFE_BUILTIN_FUNCTIONS`."""
     # The tables are dictionaries, so a lookup hashes `obj`, and that raises `TypeError` for
     # an object that can't be hashed, such as an instance of a class that sets `__eq__` but
-    # not `__hash__`. Every key in the tables can be hashed, so such an object is none of
-    # them: it is not listed, and the other checks decide about it.
+    # not `__hash__`. Every key in the tables is an object that can be hashed, so such an
+    # object is not one of them. It may still pass the call on to one: the check refuses a
+    # weak proxy before this lookup, and follows an object's class `__call__` as its own step.
     try:
         hash(obj)
     except TypeError:
@@ -431,6 +454,15 @@ def _call_targets(obj: Any) -> List[Any]:
     # the check does not read function bodies, so the wrapped function is checked here.
     if isinstance(obj, functools.partialmethod):
         targets.append(obj.func)
+    # Since Python 3.10 a `staticmethod` can be called by itself, and it calls its function.
+    if isinstance(obj, staticmethod):
+        targets.append(obj.__func__)
+    if isinstance(obj, _LRU_CACHE_WRAPPER_TYPE):
+        targets.append(obj.__wrapped__)
+    # Calling `list[int]` calls `list`. The origin is read through the type's own slot,
+    # because a generic alias forwards most attribute reads to its origin.
+    if type(obj) is types.GenericAlias:
+        targets.append(_GENERIC_ALIAS_ORIGIN.__get__(obj))
 
     # A bound method calls its function with the object first. A Python method keeps the
     # function in `__func__`.
@@ -458,7 +490,9 @@ def _call_targets(obj: Any) -> List[Any]:
     # Calling an object runs the `__call__` that Python finds on its class and binds to the
     # object, which may be a refused function, such as `__call__ = staticmethod(getattr)`.
     # A built-in type's own `__call__` is a C-level wrapper (`WrapperDescriptorType`) that
-    # only calls the object, so it adds nothing to check.
+    # runs the type's own call code. The built-in types this check knows to call another
+    # object (a partial, a staticmethod, an `lru_cache()` wrapper, a generic alias, a bound
+    # method) are followed above. Others, such as a `ctypes` callback, are not.
     class_call = None if type(obj) in _BUILTIN_CALL_TYPES else _find_on_type(obj, "__call__")
     if class_call is not None and not isinstance(class_call, types.WrapperDescriptorType):
         targets.append(class_call)

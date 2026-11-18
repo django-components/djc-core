@@ -122,8 +122,11 @@ def _format_error_with_context(
 
     # Update exception message
     error.args = ("\n".join(error_lines),)
-    # Mark that this error has been processed by error_context
+    # Mark that this error has been processed by error_context, and for which source string
+    # (compared by identity), so that a helper of the same expression leaves it alone. Two
+    # expressions compiled from the same string object count as one here.
     error._error_processed = True  # type: ignore[attr-defined]
+    error._error_source = source  # type: ignore[attr-defined]
 
 
 def error_context(func_name: str) -> Callable[[T], T]:
@@ -132,7 +135,7 @@ def error_context(func_name: str) -> Callable[[T], T]:
 
     Extracts token tuple (start_index, end_index) from the third positional argument,
     and on error, formats the error with underlined source code. An error that another
-    `error_context` function has formatted already passes through unchanged.
+    `error_context` function has formatted for the same expression passes through unchanged.
     """
 
     def decorator(func: T) -> T:
@@ -147,11 +150,13 @@ def error_context(func_name: str) -> Callable[[T], T]:
                 # On success return result normally
                 return func(*args, **kwargs)
             except Exception as e:
-                # An inner helper may have added its context already: a `safe_eval()` hook wraps
-                # the default check, and a lambda in the expression runs inside the call that
-                # calls it. Keep the innermost message, which points at the exact place, rather
-                # than printing the prefix and the source excerpt a second time.
-                if not getattr(e, "_error_processed", False):
+                # An inner helper of the same expression may have added its context already: a
+                # `safe_eval()` hook wraps the default check, and a lambda in the expression runs
+                # inside the call that calls it. Keep that message, which points at the exact
+                # place, rather than printing the prefix and the excerpt a second time. An error
+                # from another expression, such as one that a function in the context evaluates,
+                # still gets this expression's excerpt, so the reader sees both places.
+                if getattr(e, "_error_source", None) is not source:
                     _format_error_with_context(e, source, start_index, end_index, func_name)
                 raise
 

@@ -18,18 +18,20 @@
   interpolation's `expression` holds its source text.
 - A `safe_eval()` expression nested too deeply now raises `SyntaxError` instead
   of crashing the process.
-- `safe_eval()` now refuses keyword argument names that start with `_` in a
-  call, written as `f(_x=1)` or passed through `f(**mapping)`. Such keywords used
-  to work.
-- `safe_eval()` now refuses a function that it already refuses, such as
-  `str.format`, when it is reached through another object: its `__call__`, a
-  bound method, or the `__call__` of an object's class.
-- `safe_eval()` can now call an object that can't be hashed. It used to raise
-  `TypeError`.
-- A `safe_eval()` error now shows its message and source excerpt once, also when
-  you pass a `validate_*` hook or the error happens inside a lambda. A keyword
-  argument named `func` now reaches the called function instead of raising
-  `TypeError`.
+- `safe_eval()` now raises `SecurityError` for a keyword argument name that
+  starts with `_` in a call, written as `f(_x=1)` or passed through
+  `f(**mapping)`. Such calls used to run; pass the value under another name.
+- `safe_eval()` now also raises `SecurityError` when you call a refused function
+  such as `str.format` through another object: its `__call__`, a bound method, a
+  `staticmethod`, a `functools.partialmethod`, an `lru_cache()` or `cache()`
+  wrapper, a generic alias, or the `__call__` of an object's class. A weak proxy
+  of a callable is refused too.
+- `safe_eval()` can now call an object that can't be hashed, other than a weak
+  proxy. It used to raise `TypeError`.
+- A `safe_eval()` error now shows its message and source excerpt once, even when
+  you pass a `validate_*` hook or the error happens inside a lambda.
+- A keyword argument named `func` in a `safe_eval()` call now reaches the called
+  function instead of raising `TypeError`.
 - `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts and
   parentheses more than 64 levels deep, instead of crashing the process at a few
   thousand levels. Brackets inside strings and comments do not count. Tags nested
