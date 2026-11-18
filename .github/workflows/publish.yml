@@ -48,6 +48,10 @@ jobs:
   linux:
     needs: [check-version]
     runs-on: ${{ matrix.platform.runner }}
+    env:
+      # `psm`, which `stacker` uses, has s390x assembly that needs this baseline.
+      # It matches the oldest s390x CPU that Rust itself targets.
+      CFLAGS_s390x_unknown_linux_gnu: -march=z10
     strategy:
       # One target failing, such as a brief network error in a build image, should
       # not cancel the others. The upload job still needs every job to pass.
