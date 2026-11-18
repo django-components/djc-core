@@ -2,6 +2,10 @@
 
 ## v1.4.0
 
+### Known issue
+
+- The wheel for Python 3.10 on musl Linux does not load in Python builds that name compiled modules with a `linux-musl` tag, such as the standalone Pythons that `uv` installs. Alpine's own Python 3.10 and Python 3.11 and newer are not affected.
+
 ### Feat
 
 - Add support for Python 3.15, with wheels for the same platforms as 3.14.

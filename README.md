@@ -10,6 +10,10 @@ Rust-based parsers and toolings used by [django-components](https://github.com/d
 pip install djc-core
 ```
 
+### Known issue: musl and Python 3.10
+
+The wheel for Python 3.10 on musl Linux (such as Alpine) does not load in Python builds that name compiled modules with a `linux-musl` tag, such as the standalone Pythons that `uv` installs: `import djc_core` fails there. Alpine's own Python 3.10 loads it. Python 3.11 and newer are not affected, so on musl, use Python 3.11 or newer.
+
 ## Packages
 
 ### Safe eval
