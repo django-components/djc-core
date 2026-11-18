@@ -2007,7 +2007,7 @@ class TestSecurityJinjaCompat:
         context = {}
         with pytest.raises(
             SecurityError,
-            match="function '.*format.*' is unsafe\\. Use f-strings instead\\.",
+            match="attribute 'format' on object .* is unsafe\\. Use an f-string instead",
         ):
             compiled(context)
 
@@ -2016,38 +2016,32 @@ class TestSecurityJinjaCompat:
         context = {}
         with pytest.raises(
             SecurityError,
-            match="function '.*format_map.*' is unsafe\\. Use f-strings instead\\.",
+            match="attribute 'format_map' on object .* is unsafe\\. Use an f-string instead",
         ):
             compiled(context)
 
     def test_indirect_call_via_attr(self):
-        # Mimic the exploit - first get the str.format and assign to a variable
-        compiled = safe_eval("(format_func := str.format)")
-        context = {"str": str}
-        compiled(context)
-        assert context == {"str": str, "format_func": str.format}
+        # Mimic the exploit - first get the str.format and assign to a variable. Reading it is
+        # refused, so it can't be stored for a later expression.
+        for name in ("format", "format_map"):
+            with pytest.raises(SecurityError, match=f"attribute '{name}' on object .* is unsafe"):
+                safe_eval(f"(format_func := str.{name})")({"str": str})
 
-        # Reusing the context object (what would happen in the template),
-        # use `format_func` to call `str.format`
+        # A function the app stored in the context is still refused when called.
+        context = {"format_func": str.format}
         compiled = safe_eval('format_func("{b.__class__}", b=42)')
         with pytest.raises(
             SecurityError,
-            match="function '.*format.*' is unsafe\\. Use f-strings instead\\.",
+            match="function '.*format.*' is unsafe\\. Use an f-string instead",
         ):
             compiled(context)
 
         # Same for format_map
-        compiled = safe_eval("(format_func := str.format_map)")
-        context = {"str": str}
-        compiled(context)
-        assert context == {"str": str, "format_func": str.format_map}
-
-        # Reusing the context object (what would happen in the template),
-        # use `format_func` to call `str.format`
+        context = {"format_func": str.format_map}
         compiled = safe_eval('format_func("{b.__class__}", {"b": 42})')
         with pytest.raises(
             SecurityError,
-            match="function '.*format_map.*' is unsafe\\. Use f-strings instead\\.",
+            match="function '.*format_map.*' is unsafe\\. Use an f-string instead",
         ):
             compiled(context)
 

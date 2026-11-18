@@ -1,4 +1,5 @@
 import builtins
+from itertools import chain
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Tuple
 
@@ -136,6 +137,11 @@ def safe_eval(
         ) -> Any:
             if not validate_callable(func):
                 raise SecurityError(f"function '{func!r}' is unsafe")
+            # The hook also checks each function passed as an argument, for the same reason
+            # `call` does: `items.sort(key=fn)` runs `fn` without asking the hook.
+            for value in chain(args, kwargs.values()):
+                if callable(value) and not validate_callable(value):
+                    raise SecurityError(_passed_function_message(value, func, None))
             return call(__context, __source, __token, func, *args, **kwargs)
     else:
         call_fn = call
@@ -359,7 +365,30 @@ def call(
                     f"keyword argument {name!r} is unsafe. Keyword names that start with '_' are not "
                     "allowed; pass the value under another name."
                 )
+    # A function given to the call may be called by it, and a built-in such as `list.sort`,
+    # `sorted` or `map` does that without coming back through this helper. So a function
+    # that the expression may not call is refused here, when the expression hands it over.
+    # The arguments are the final ones, after `*args` and `**mapping` are unpacked. A
+    # function inside a list or dict argument is not looked for: that would cost time in
+    # proportion to the container on every call, and the docs tell apps not to pass the
+    # helpers, such as `map(map, ...)`, that call functions found that way.
+    for value in chain(args, kwargs.values()):
+        # `callable()` reads only the type, so a value that can't be called adds only this
+        # one cheap test.
+        if callable(value):
+            is_safe, replacement_message = is_safe_callable(value)
+            if not is_safe:
+                raise SecurityError(_passed_function_message(value, func, replacement_message))
     return func(*args, **kwargs)
+
+
+def _passed_function_message(value: Any, func: Any, replacement_message: Optional[str]) -> str:
+    """Return the refusal message for a refused function passed as an argument of `func`."""
+    message = (
+        f"function '{value!r}' is unsafe, so it can't be passed to '{func!r}', "
+        "which could call it"
+    )
+    return f"{message}. {replacement_message}" if replacement_message else message
 
 
 @error_context("assign")

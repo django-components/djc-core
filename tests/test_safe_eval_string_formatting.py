@@ -3,9 +3,11 @@ The sandbox refuses every string method that reads attribute paths named inside 
 
 `"{0.name}".format(obj)` reads `obj.name`, and `"{0.__class__}"` reads what the sandbox
 hides everywhere else, because the format methods look up each field with the real
-`getattr`. The sandbox refuses `str.format` and `str.format_map`. These tests cover the
-other classes with the same behavior: `str` subclasses that define their own methods
-(`markupsafe.Markup` is one), `collections.UserString`, and `string.Formatter`.
+`getattr`. The sandbox refuses reading `str.format` and `str.format_map`, not only calling
+them, because a built-in such as `list.sort` calls a `key=` function without the call check.
+These tests also cover the other classes with the same behavior: `str` subclasses that
+define their own methods (`markupsafe.Markup` is one), `collections.UserString`, and
+`string.Formatter`.
 """
 
 import collections
@@ -129,23 +131,23 @@ class TestStringTypes:
         )
 
     @pytest.mark.parametrize("method", ["format", "format_map"])
-    def test_a_user_string_function_stored_first_is_refused_when_called(self, method):
-        # `UserString.format` is a plain function that is not the one on `str`, so the
-        # call check must know it by itself.
+    def test_a_user_string_function_passed_in_by_the_app_is_refused_when_called(self, method):
+        # `UserString.format` is a plain function that is not the one on `str`. The expression
+        # can't read it from the class, but the app may pass it in, so the call check must know
+        # it by itself.
         text = FORMAT_TEXT if method == "format" else FORMAT_MAP_TEXT
         argument = "holder" if method == "format" else "{'o': holder}"
         context: dict[str, Any] = {
-            "cls": collections.UserString,
+            "fn": getattr(collections.UserString, method),
             "value": collections.UserString(text),
             "holder": Holder(),
         }
-        safe_eval(f"(fn := cls.{method})")(context)
         with pytest.raises(SecurityError) as error:
             safe_eval(f"fn(value, {argument})")(context)
         assert SECRET not in str(error.value)
 
     def test_the_error_names_the_replacement_for_every_string_type(self, string_type):
-        with pytest.raises(SecurityError, match=r"Use f-strings instead\."):
+        with pytest.raises(SecurityError, match=r"Use an f-string instead, such as f\"\{a\} and \{b\}\""):
             evaluate("value.format(holder)", value=string_type(FORMAT_TEXT), holder=Holder())
 
 
@@ -283,13 +285,14 @@ class TestPolicyFunctions:
         assert is_safe_attribute(SubclassedUserString, name) is False
 
     @pytest.mark.parametrize("name", ["format", "format_map"])
-    def test_attribute_policy_leaves_exact_str_to_the_call_check(self, name):
-        # `str.format` stays readable so the refusal comes from the call, with its message.
+    def test_attribute_policy_refuses_exact_str_too(self, name):
+        # Reading is refused, because `list.sort(key=...)` would call the method without the
+        # call check. The call check still refuses one that the app passes in.
         for exact in (str, collections.UserString):
-            assert is_safe_attribute(exact("x"), name) is True
-            assert is_safe_attribute(exact, name) is True
-            assert is_safe_callable(getattr(exact("x"), name)) == (False, "Use f-strings instead.")
-            assert is_safe_callable(getattr(exact, name)) == (False, "Use f-strings instead.")
+            assert is_safe_attribute(exact("x"), name) is False
+            assert is_safe_attribute(exact, name) is False
+            assert is_safe_callable(getattr(exact("x"), name))[0] is False
+            assert is_safe_callable(getattr(exact, name))[0] is False
 
     @pytest.mark.parametrize("name", ["upper", "replace", "join", "strip"])
     def test_attribute_policy_leaves_other_string_methods_alone(self, name):

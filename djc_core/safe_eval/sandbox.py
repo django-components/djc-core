@@ -21,11 +21,15 @@ It refuses:
   `types.GenericAlias`, a bound method, a function's `__call__`, or an object whose class
   `__call__` is one of them. A weak proxy of a callable is refused, because it hides what it
   calls.
-- Text formatting that follows paths written inside the string: `format` and `format_map`
-  of any string type (`str`, its subclasses such as `markupsafe.Markup`, and
-  `collections.UserString`), every method of a `string.Formatter`, and building an
-  `operator.attrgetter` or `operator.methodcaller`. Use f-strings instead.
+- Text formatting that follows paths written inside the string. Reading `format` or
+  `format_map` on a `str`, a `str` subclass such as `markupsafe.Markup`, or a
+  `collections.UserString`, or any method of a `string.Formatter`, is refused, and so is
+  building an `operator.attrgetter` or `operator.methodcaller`. Use f-strings instead.
 - Functions marked with `@unsafe` or `alters_data = True`.
+- Passing a function that the expression may not call directly as an argument of a call,
+  such as `items.sort(key=obj.delete)`. A built-in like `list.sort` or `sorted` calls the
+  function it is given without these checks, so the check runs when the expression hands
+  it over. A function inside a list, tuple or dict argument is not checked.
 
 What the sandbox does not promise
 ---------------------------------
@@ -36,11 +40,14 @@ It is a second layer of protection. It does not make a template from a stranger 
   object can reach or do is available to the expression. A secret in a public attribute
   is readable, and a public method that deletes data can be called. Mark such a method
   with `@unsafe`, or leave the object out of the context.
-- It checks only the lookups and calls that the expression text writes. A function that
-  you pass in and that calls other functions or looks up names from text does so without
-  these checks. Examples are `map`, `functools.reduce`, a `key=` argument of `sorted` or
-  `list.sort`, a `getattr`-style helper, `inspect`, `importlib`, and `logging.Formatter`
-  with `{` style. Do not pass such helpers in.
+- It checks only the lookups and calls that the expression text writes, and the functions
+  that a call receives directly as arguments. A function that you pass in and that looks up
+  names from text, or calls functions it finds inside a list or another object, does so
+  without these checks. Examples are `map` and `functools.reduce` (which can be given
+  themselves, as in `map(map, [f], [[x]])`), `itertools.starmap`, `operator.call`, `type`
+  with three arguments (it builds a class from a dict of functions), a `getattr`-style
+  helper, `inspect`, `importlib`, and `logging.Formatter` with `{` style. Do not pass such
+  helpers in.
 - It hides an item key that starts with `_` only when the expression writes the lookup
   itself. `data["_key"]` is refused, but `data.get("_key")`, iterating over `data`, and
   `"%(_key)s" % data` read the same item.
@@ -154,8 +161,9 @@ UNSAFE_BUILTIN_FUNCTIONS: Dict[Any, Optional[str]] = {
 # type that has such methods is refused, not only `str`: `str` subclasses may define their
 # own (`markupsafe.Markup` does), `collections.UserString` is not a `str` subclass and calls
 # the real `str.format`, and `string.Formatter` is the object that does the lookup.
-# Use f-strings instead.
-_FORMAT_MESSAGE = "Use f-strings instead."
+# Reading the method is refused, not only calling it, because a built-in such as `list.sort`
+# calls a `key=` function without going through this module.
+_FORMAT_MESSAGE = 'Use an f-string instead, such as f"{a} and {b}" in place of "{} and {}".format(a, b).'
 
 #: The methods that format a string by following the paths written inside it.
 _FORMAT_METHOD_NAMES = frozenset({"format", "format_map"})
@@ -170,10 +178,11 @@ _FORMATTER_METHOD_NAMES = frozenset(
 #: this set first keeps the extra `isinstance` calls off the path of every other name.
 _FORMATTING_ATTRIBUTE_NAMES = _FORMAT_METHOD_NAMES | _FORMATTER_METHOD_NAMES
 
-# The functions below are what a class lookup returns, such as `UserString.format`. They are
-# refused by identity. A subclass's own override (`Markup.format`) is a different function
-# that cannot be listed ahead of time, so `is_safe_attribute` refuses it by the type of the
-# object it is read from, and `_formatting_method_message` refuses a bound one by its owner.
+# The functions below are what a class lookup returns, such as `UserString.format`. The
+# expression can't read them, but the app may pass one in, so they are refused by identity
+# when called or passed to a call. A subclass's own override (`Markup.format`) is a different function that can't
+# be listed ahead of time, so `is_safe_attribute` refuses it by the type of the object it is
+# read from, and `_formatting_method_message` refuses a bound one by its owner.
 UNSAFE_FUNCTIONS: Dict[Any, Optional[str]] = {
     str.format: _FORMAT_MESSAGE,
     str.format_map: _FORMAT_MESSAGE,
@@ -246,14 +255,15 @@ def _is_formatting_member(obj: Any, attr: str) -> bool:
     """
     Test if reading `attr` from `obj` gives a method that formats text by following paths.
 
-    That is `format` or `format_map` on a `str` subclass or `collections.UserString` (the
-    object or the class itself), and any method of `string.Formatter` on a formatter or a
-    formatter class. Exact `str` and `UserString` are left out: their methods are known
-    functions that `is_safe_callable` refuses with a message when they are called.
+    That is `format` or `format_map` on `str`, `collections.UserString` or a subclass of
+    either (the object or the class itself), and any method of `string.Formatter` on a
+    formatter or a formatter class.
 
     >>> _is_formatting_member(string.Formatter(), "vformat")
     True
     >>> _is_formatting_member("text", "format")
+    True
+    >>> _is_formatting_member("text", "upper")
     False
     """
     is_class = isinstance(obj, type)
@@ -263,9 +273,10 @@ def _is_formatting_member(obj: Any, attr: str) -> bool:
 
     if derives_from(string.Formatter):
         return attr in _FORMATTER_METHOD_NAMES
-    if attr in _FORMAT_METHOD_NAMES and derives_from((str, UserString)):
-        return (obj if is_class else type(obj)) not in (str, UserString)
-    return False
+    # Exact `str` counts too. The call check knows `str.format`, but a built-in that calls
+    # a function it is given, such as `[obj].sort(key="{0._x}".format)`, never runs that
+    # check, so the bound method must not reach the expression at all.
+    return attr in _FORMAT_METHOD_NAMES and derives_from((str, UserString))
 
 
 def is_safe_attribute(obj: Any, attr: str) -> bool:
@@ -276,7 +287,7 @@ def is_safe_attribute(obj: Any, attr: str) -> bool:
     - Starting with an underscore `_`
     - Internal attributes as set by `_is_internal_attribute`.
     - The methods that format text by following paths inside it: `format` and
-      `format_map` on a `str` subclass or `UserString`, and the methods of a
+      `format_map` on `str`, `UserString` and their subclasses, and the methods of a
       `string.Formatter` (see `_is_formatting_member`).
     """
     # Non-string subscripts should be fine, as they should be found only

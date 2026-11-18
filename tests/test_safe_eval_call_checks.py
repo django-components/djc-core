@@ -338,8 +338,10 @@ class TestCallTargets:
         assert is_safe_callable(func)[0] is False
 
     def test_format_through_call_is_refused_with_its_message(self) -> None:
-        assert is_safe_callable(str.format.__call__) == (False, "Use f-strings instead.")
-        with pytest.raises(SecurityError, match="Use f-strings instead") as excinfo:
+        is_safe, message = is_safe_callable(str.format.__call__)
+        assert is_safe is False
+        assert message is not None and message.startswith("Use an f-string instead")
+        with pytest.raises(SecurityError, match="Use an f-string instead") as excinfo:
             run("f('{0.secret}', obj)", {"f": str.format.__call__, "obj": Holder()})
         assert MARKER not in excinfo.value.args[0]
 

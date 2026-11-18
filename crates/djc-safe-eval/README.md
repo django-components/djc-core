@@ -240,7 +240,8 @@ The sandbox refuses the cases below. Each raises `SecurityError` when the expres
 - **Unsafe methods**:
   - Functions decorated with `@unsafe`
   - Django methods marked with `alters_data = True`
-  - `format` and `format_map` of any string type (`str`, its subclasses such as `markupsafe.Markup`, and `collections.UserString`), every method of a `string.Formatter`, and building an `operator.attrgetter` or `operator.methodcaller` (use f-strings instead)
+  - Reading `format` or `format_map` on a `str`, a `str` subclass such as `markupsafe.Markup`, or a `collections.UserString`, or any method of a `string.Formatter`, and building an `operator.attrgetter` or `operator.methodcaller` (use f-strings instead)
+- **Passing a refused function to another function**: A function the sandbox refuses to call (any of the above) given directly as an argument of a call, such as `items.sort(key=obj.delete)`. A built-in such as `list.sort`, `sorted` or `map` calls the function it is given without these checks, so the check runs when the expression hands the function over. A `validate_callable` hook also receives each function passed as an argument. A function inside a list, tuple or dict argument is not checked.
 - **Internal attributes**: Prevents access to frame, code, and other internal Python object attributes
 - **Names the sandbox uses itself**: A lambda parameter or comprehension variable whose name starts with `_sx_` is a `SyntaxError`, because the sandbox's own helpers use that prefix and the name could replace one of them.
 
@@ -249,7 +250,7 @@ The sandbox refuses the cases below. Each raises `SecurityError` when the expres
 `safe_eval()` is a second layer of protection, not a promise that a template from a stranger is safe to run. The expression text must come from the template author. Request data belongs in the context, as a value.
 
 - **It does not limit the objects you pass in.** An expression can read every attribute and call every method of a context object whose name does not start with `_`. A secret in a public attribute is readable, and a public method that deletes data can be called.
-- **It checks only what the expression text writes.** A function you pass in that calls other functions or looks up names from text (`map`, `functools.reduce`, the `key=` argument of `sorted`, a `getattr`-style helper, `inspect`, `importlib`) does so without these checks.
+- **It checks only what the expression text writes, and the functions a call receives directly as arguments.** A function you pass in that looks up names from text, or calls functions it finds inside a list or another object, does so without these checks. Examples are `map` and `functools.reduce` (which can be given themselves, as in `map(map, [f], [[x]])`), `itertools.starmap`, `operator.call`, `type` with three arguments, a `getattr`-style helper, `inspect`, and `importlib`. Do not pass such helpers in.
 - **Item keys that start with `_` are not hidden.** `data["_key"]` is refused, but `data.get("_key")` and `"%(_key)s" % data` read the same item.
 
 An expression nested too deeply raises `SyntaxError`. The limit is about 97 chained operators or 65 nested brackets.
