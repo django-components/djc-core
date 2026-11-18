@@ -284,22 +284,33 @@ Tag {
 
 `parse_tag()` raises `SyntaxError` for a tag that:
 
-- nests lists, dicts and parentheses more than 64 levels deep. Brackets
-  inside strings and `{# #}` comments do not count, and inside a Python
-  expression only `(` counts, because `safe_eval()` checks the rest of the
-  expression with its own limit;
+- nests lists, dicts, parentheses and filters more than 16 levels deep. Each
+  filter adds a level around the value before it, so `[x|upper]` is 2 levels
+  deep and `x|a|b|c` is 3, and a filter's argument sits inside that filter
+  and every filter after it. Brackets inside strings and `{# #}` comments do
+  not count, and inside a Python expression only `(` counts, because
+  `safe_eval()` checks the rest of the expression with its own limit;
 - or holds more than 100,000 `(`, `[` and `{` characters, counting those
   inside strings.
 
-The grammar, the code that builds the AST, and the compiler call themselves
-once for each level a tag value opens, so a value nested tens of thousands of
-levels deep would overflow the stack and crash the process. Within these
-limits, a tag parses and compiles to Python source on a thread with as little
-as 128 KiB of stack, and its attributes can be read from Python there: the
-code asks for more stack when it needs it. On such a thread CPython's own
-compiler may raise `MemoryError` for the deepest filter arguments, and
-`repr()` of the deepest values needs up to about 100 KiB. `compile_tag()` refuses an
-AST built by hand that nests more than 64 levels. The checks live in
+`compile_tag()` and `compile_value()` turn a tag into Python code and hand it
+to CPython's `compile()`. That code nests one call or bracket for each list,
+dict and filter, and CPython's compiler calls itself once for each of them.
+Before Python 3.14 it does not check how much stack is left. On a thread with
+a 128 KiB stack, which is the default thread size of the musl CPython builds
+that uv installs, Python 3.10 to 3.13 crash the process from about 54 levels
+of that code, and so do 3.14 and later on musl. On glibc and macOS, Python
+3.14 and later raise `MemoryError` from about 38 levels. A tag within the
+limit becomes code at most 20 levels deep, which leaves room for the frames
+of the code that calls `compile_tag()`.
+
+The grammar, the code that builds the AST, and the compiler in this crate also
+call themselves once for each level a tag value opens, so a value nested tens
+of thousands of levels deep would overflow the stack and crash the process.
+They ask for more stack when they need it. Within these limits, a tag parses
+and compiles on a thread with as little as 128 KiB of stack, and its
+attributes, `repr()` and `==` work there too. `compile_tag()` refuses an AST
+built by hand that nests more than 16 levels. The checks live in
 `src/nesting.rs`.
 
 ## On template tag compilation

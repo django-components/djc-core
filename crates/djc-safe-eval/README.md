@@ -255,7 +255,7 @@ The sandbox refuses the cases below. Each raises `SecurityError` when the expres
 - **It checks only what the expression text writes, and the functions a call receives directly as arguments.** A function you pass in that looks up names from text, or calls functions it finds inside a list or another object, does so without these checks. Examples are `map` and `functools.reduce` (`map` can be given itself as the function to call, as in `map(map, [f], [[x]])`), `itertools.starmap`, `operator.call`, `type` with three arguments, a `getattr`-style helper, `inspect`, `importlib`, and `logging.Formatter` with `{` style. Do not pass such helpers in.
 - **Item keys that start with `_` are not hidden.** `data["_key"]` is refused, but `data.get("_key")` and `"%(_key)s" % data` read the same item.
 
-An expression nested too deeply raises `SyntaxError`. The limit is about 97 chained operators or 65 nested brackets.
+An expression nested too deeply raises `SyntaxError`. It may chain about 97 operators, and the Python code `safe_eval()` writes for it may nest calls and brackets at most 20 levels deep: each list, tuple, dict, set, call, subscript and attribute read adds a level, a variable read from the context adds two, and an f-string two or more. That allows 20 nested lists or 18 chained attribute reads. CPython compiles that code, and on a thread with a small stack, such as the 128 KiB default of the musl CPython builds that uv installs, deeper code can crash the process.
 
 ## Syntax features
 

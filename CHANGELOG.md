@@ -17,7 +17,13 @@
   surrogate escape such as `'\ud800'` now means that character, and a t-string
   interpolation's `expression` holds its source text.
 - A `safe_eval()` expression nested too deeply now raises `SyntaxError` instead
-  of crashing the process.
+  of crashing the process. That includes code too deep for CPython's own
+  compiler on a thread with a small stack, such as the 128 KiB default of the
+  musl builds of Python that uv installs: the code `safe_eval()` writes may nest
+  at most 20 calls and brackets, which allows 20 nested lists or 18 chained
+  attribute reads.
+  Deeper expressions used to work on threads with a large stack and are now
+  refused.
 - `safe_eval()` now raises `SecurityError` for a keyword argument name that
   starts with `_` in a call, written as `f(_x=1)` or passed through
   `f(**mapping)`. Such calls used to run; pass the value under another name.
@@ -47,12 +53,15 @@
   still works; to call a string method, write `f"{text}".upper()`. Calling
   Django's `format_lazy()`, `format_html()` or `format_html_join()`, or a `lazy()`
   or `keep_lazy()` wrapper around a refused function, is refused like `str.format`.
-- `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts and
-  parentheses more than 64 levels deep, instead of crashing the process at a few
-  thousand levels. Brackets inside strings and comments do not count. Tags nested
-  65 to between about 1,300 and 3,600 levels, depending on what they nest, used to
-  parse and are now refused. A tag with more than 100,000 `(`, `[` and `{`
-  characters, counting those inside strings, is refused too.
+- `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts,
+  parentheses and filters more than 16 levels deep, instead of crashing the
+  process. Each filter counts as a level, so `x|a|b` is 2 levels deep. Brackets
+  inside strings and comments do not count. Deeper tags used to parse and are
+  now refused: from about 50 levels `compile_tag()` could crash a thread with a
+  small stack, such as the 128 KiB default of the musl builds of Python that uv
+  installs, and parsing crashed at a few thousand levels. A tag with more than
+  100,000 `(`, `[` and `{` characters, counting those inside strings, is refused
+  too.
 - A plain tag string can now hold its own quote as `\"` or `\'`, and a tag key can
   end in a backslash.
 

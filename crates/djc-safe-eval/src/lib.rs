@@ -18,11 +18,11 @@ pub use transformer::{
 };
 
 pub fn safe_eval(source: &str) -> Result<String, String> {
-    // The transformed tree is generated back into code and dropped here, so
-    // this whole call needs the same stack guarantee as the passes it calls.
+    // The transformed tree is dropped here, which calls itself once per
+    // level, so this whole call needs the same stack guarantee as the passes
+    // it calls.
     stack::with_enough_stack(|| {
         let result = transform_expression_string(source)?;
-        let generated_code = codegen::generate_python_code(&result.expression);
-        Ok(generated_code)
+        Ok(result.code)
     })
 }

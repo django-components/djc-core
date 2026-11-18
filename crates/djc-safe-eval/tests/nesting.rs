@@ -12,9 +12,13 @@
 //! - on a thread with a 256 KiB stack, every accepted expression goes through
 //!   every pass without a crash, and every rejected one gets the clean error.
 //!
+//! The Python code written for an accepted expression must also nest at most
+//! `MAX_CODE_NESTING` brackets and calls, because CPython compiles it later.
+//! The Python tests check that such code compiles on a small thread.
+//!
 //! A crash here aborts this test binary, which fails the test run.
 
-use djc_safe_eval::nesting::{MAX_NESTING, nesting_bound};
+use djc_safe_eval::nesting::{MAX_CODE_NESTING, MAX_NESTING, code_nesting, nesting_bound};
 use djc_safe_eval::{parse_expression, safe_eval, transform_expression_string};
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
@@ -128,14 +132,19 @@ fn on_stack(stack: usize, check: impl FnOnce() + Send + 'static) {
 }
 
 /// Run every public pass on `source`, and check that a rejected expression
-/// gets the clean error.
+/// gets the clean error and that accepted code is not nested too deeply.
 fn run_every_pass(source: &str) {
     let rejected = nesting_bound(source) > MAX_NESTING;
     let parsed = parse_expression(source)
         .map(|_| ())
         .map_err(|e| e.to_string());
     let transformed = transform_expression_string(source).map(|_| ());
-    let evaluated = safe_eval(source).map(|_| ());
+    let evaluated = safe_eval(source).map(|code| {
+        assert!(
+            code_nesting(&code) <= MAX_CODE_NESTING,
+            "{source:.80}: {code:.200}"
+        );
+    });
     if rejected {
         for result in [parsed, transformed, evaluated] {
             let error = result.expect_err("a rejected expression must fail");
@@ -346,5 +355,64 @@ fn ordinary_expressions_stay_far_below_the_limit() {
             "{source}: {}",
             nesting_bound(source)
         );
+    }
+}
+
+#[test]
+fn code_nesting_counts_brackets_outside_strings() {
+    for (code, depth) in [
+        ("x", 0),
+        ("f(x)[0]", 1),
+        ("f([{1: (2,)}])", 4),
+        ("'((([' + [x]", 1),
+        ("\"\"\"(\\n[\"\"\" + (1)", 1),
+        ("b'{' + r'\\(' + \"'(\"", 0),
+        ("(1) + (2) + (3)", 1),
+    ] {
+        assert_eq!(code_nesting(code), depth, "{code}");
+    }
+}
+
+#[test]
+fn code_nested_too_deeply_is_refused() {
+    // The deepest accepted expression of each shape writes code exactly at
+    // the limit. Nested lists write one bracket per list. An attribute read
+    // writes one call, and the name at the bottom a call and a tuple, so an
+    // attribute chain fits two reads fewer.
+    let lists = |n: usize| "[".repeat(n) + &"]".repeat(n);
+    let attributes = |n: usize| "a".to_string() + &".b".repeat(n);
+    for (accepted, refused) in [
+        (lists(MAX_CODE_NESTING), lists(MAX_CODE_NESTING + 1)),
+        (
+            attributes(MAX_CODE_NESTING - 2),
+            attributes(MAX_CODE_NESTING - 1),
+        ),
+    ] {
+        let code = safe_eval(&accepted).expect(&accepted);
+        assert_eq!(code_nesting(&code), MAX_CODE_NESTING, "{code}");
+        assert!(nesting_bound(&refused) <= MAX_NESTING, "{refused}");
+        for error in [
+            safe_eval(&refused).unwrap_err(),
+            transform_expression_string(&refused)
+                .map(|_| ())
+                .unwrap_err(),
+        ] {
+            assert!(error.contains(TOO_DEEP), "{error}");
+            assert!(error.contains("calls and brackets"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn ordinary_expressions_write_shallow_code() {
+    // The examples in `MAX_CODE_NESTING`'s doc comment.
+    for (source, depth) in [
+        ("a.b(c[d] + 1)", 4),
+        (
+            "qs.filter(a=1).exclude(b=2).order_by('c').values('d').distinct()[:10]",
+            13,
+        ),
+    ] {
+        assert_eq!(code_nesting(&safe_eval(source).unwrap()), depth, "{source}");
     }
 }

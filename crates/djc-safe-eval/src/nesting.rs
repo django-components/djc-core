@@ -28,6 +28,15 @@
 //! The check runs before parsing, so it also guards input that does not
 //! parse: Ruff still builds a partial tree for it, and dropping that tree
 //! calls itself once per level too.
+//!
+//! A second check, `check_code_nesting`, reads the Python code the sandbox
+//! writes for the expression, which `safe_eval()` in Python hands to CPython's
+//! `compile()`. CPython's compiler calls itself once per nested bracket or
+//! call, and before 3.14 it has no stack check of its own, so code that is
+//! fine for the passes here can still crash a small thread there. The
+//! sandbox wraps each attribute read, call, subscript and name in a call of
+//! its own (`a.b` becomes `_sx_attribute(..., _sx_variable(..., (0, 1),
+//! 'a'), 'b')`), so this depth differs from the tree depth above.
 
 use ruff_python_parser::lexer::lex;
 use ruff_python_parser::{Mode, ParseError, ParseErrorType, TokenKind};
@@ -44,6 +53,19 @@ use ruff_text_size::{TextRange, TextSize};
 /// it: `a.b(c[d] + 1)`
 /// has a bound of 16, and a list comprehension with a condition about 20.
 pub const MAX_NESTING: usize = 200;
+
+/// The most levels of brackets and calls the Python code written for one
+/// expression may nest.
+///
+/// On a thread with a 128 KiB stack, CPython's `compile()` crashes from about
+/// 54 levels on Python 3.10 to 3.13 (and on 3.14 and later on musl) and
+/// raises `MemoryError` from about 38 on 3.14 and later on glibc and macOS;
+/// see `djc_template_parser::nesting::MAX_NESTING`, which limits the Python
+/// written for a template tag to the same depth. `safe_eval()` in Python
+/// adds one more level around the code. Typical template expressions stay
+/// far below the limit: `a.b(c[d] + 1)` becomes code 4 levels deep, and a
+/// chain of five method calls with a subscript 13.
+pub const MAX_CODE_NESTING: usize = 20;
 
 /// One bracket that is still open while the tokens are read.
 #[derive(Default)]
@@ -206,4 +228,45 @@ pub fn check_nesting(source: &str) -> Result<(), ParseError> {
         )),
         location: TextRange::new(TextSize::default(), TextSize::of(source)),
     })
+}
+
+/// The deepest nesting of `(`, `[` and `{` in `code`, as CPython's tokenizer
+/// counts it. Brackets inside string literals do not count.
+pub fn code_nesting(code: &str) -> usize {
+    let mut depth: usize = 0;
+    let mut deepest = 0;
+    let mut lexer = lex(code, Mode::Expression);
+    loop {
+        match lexer.next_token() {
+            TokenKind::EndOfFile => break,
+            TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            // The code comes from the code generator and is balanced; the
+            // saturating step only keeps a stray `)` from wrapping around.
+            TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// Reject the code written for an expression when it nests deeper than
+/// [`MAX_CODE_NESTING`] (see the module notes).
+pub fn check_code_nesting(code: &str) -> Result<(), String> {
+    let depth = code_nesting(code);
+    if depth <= MAX_CODE_NESTING {
+        return Ok(());
+    }
+    Err(format!(
+        "expression is nested too deeply: the Python code djc_core writes for it \
+         nests calls and brackets {depth} levels deep, and the limit is \
+         {MAX_CODE_NESTING}. Each list, tuple, dict, set, call, subscript and attribute \
+         read adds a level, a variable read from the context adds two, and an f-string adds two \
+         or more. Split it into smaller expressions, or compute part of it in Python \
+         first."
+    ))
 }

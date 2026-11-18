@@ -250,7 +250,9 @@
 // - ❌                - StmtIpyEscapeCommand
 // - ❌                - ExprIpyEscapeCommand
 
+use crate::codegen::generate_python_code;
 use crate::comments::extract_comments;
+use crate::nesting::check_code_nesting;
 use crate::parse::parse_expression;
 use crate::stack::with_enough_stack;
 use crate::utils::literal_source::{
@@ -304,6 +306,9 @@ pub struct TransformResult {
     pub assigned_vars: Vec<Token>,
     /// Comments found in the original source
     pub comments: Vec<Comment>,
+    /// The transformed expression as Python code, already checked by
+    /// `nesting::check_code_nesting`
+    pub code: String,
 }
 
 /// Adjust byte ranges in error messages to account for source wrapping
@@ -524,11 +529,19 @@ fn transform_expression_source(source: &str) -> Result<TransformResult, String> 
         comment.value.line_col = (adjusted_line, adjusted_col);
     }
 
+    // CPython compiles this code later, and its compiler can crash a small
+    // thread on code that nests too deeply, so check the code itself here.
+    // `parse_tag` calls this function too, so a tag never holds an
+    // expression that `safe_eval()` would refuse for its depth.
+    let code = generate_python_code(&expr);
+    check_code_nesting(&code)?;
+
     Ok(TransformResult {
         expression: expr,
         used_vars,
         assigned_vars,
         comments,
+        code,
     })
 }
 

@@ -75,6 +75,10 @@ impl TagParser {
             })?;
 
             let tag = Self::parse_tag_inner(tag_pair, &context)?;
+            // Filters add levels to the Python that `compile_tag` writes, and
+            // the grammar's output does not show how many follow a value, so
+            // the finished AST is checked once more with filters counted.
+            nesting::check_tag_depth(input, &tag)?;
             Ok((tag, context))
         })
     }

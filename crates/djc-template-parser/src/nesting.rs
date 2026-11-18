@@ -30,6 +30,13 @@
 //! 3 also make sure any other input step 2 reads differently still ends in a
 //! clean error.
 //!
+//! After the AST is built, `check_tag_depth` counts the levels once more, now
+//! with filters: the Python that `tag_compiler.rs` writes wraps a value in one
+//! `filter(...)` call per filter, so each filter adds a level around the
+//! value it applies to and around the arguments of the filters before it.
+//! CPython's own compiler then reads that Python, and it too calls itself
+//! once per level (see `MAX_NESTING`).
+//!
 //! Two more passes call themselves once per level. The compiler in
 //! `tag_compiler.rs` checks a value's depth with `check_value_depth` and runs
 //! under `with_stack_for_tree`. Copying a value, which Python's attribute
@@ -39,18 +46,31 @@
 use pest::iterators::Pairs;
 use pest::Span;
 
-use crate::ast::{TagValue, ValueChild, ValueKind};
+use crate::ast::{Tag, TagValue, ValueChild, ValueKind};
 use crate::error::{CompileError, ParseError};
 use crate::grammar::Rule;
 
-/// The most levels of lists, dicts and parentheses a tag may nest.
+/// The most levels of lists, dicts, parentheses and filters a tag value may
+/// nest.
 ///
-/// Real tags nest a few levels. At 64, the Python that `compile_tag` writes,
-/// which can add two brackets per tag level (`filter(..., [...])`), stays
-/// under CPython's limit of 200 nested brackets as long as filters are not
-/// also chained deeply, and the limit is close to the 65 nested brackets
-/// `safe_eval()` accepts in one expression.
-pub const MAX_NESTING: usize = 64;
+/// Real tags nest a few levels. The limit comes from CPython, not from this
+/// crate: `compile_tag` and `compile_value` hand the Python they write to
+/// CPython's `compile()`, which calls itself once per nested bracket or call
+/// and has no stack check of its own before 3.14. On a thread with a 128 KiB
+/// stack (the default thread size of the musl CPython builds that uv
+/// installs), CPython 3.10 to 3.13 crash from about 54 levels of that Python,
+/// and so do 3.14 and later on musl. On glibc and macOS, 3.14 and later raise
+/// `MemoryError` from about 38 levels. Measured at the top of a new thread on
+/// Linux (x86-64 and arm64, glibc and musl) and macOS arm64. Python threads
+/// on Windows got about 2 MB whatever size was asked for.
+///
+/// A tag value `MAX_NESTING` levels deep becomes Python at most 4 levels
+/// deeper (`kwargs.append((key, ...))` around it, and a `variable(..., (start,
+/// end), ...)` call inside it), so 20 levels: about half of what fits, which
+/// leaves the rest for the frames of the code that calls `compile_tag`.
+/// `safe_eval()` limits the Python it writes to the same depth (see
+/// `djc_safe_eval::nesting::MAX_CODE_NESTING`).
+pub const MAX_NESTING: usize = 16;
 
 /// The most `(`, `[` and `{` characters a tag may hold, inside strings or not.
 ///
@@ -219,30 +239,68 @@ fn nests(rule: Rule) -> bool {
     matches!(rule, Rule::list | Rule::dict | Rule::python_expr)
 }
 
-/// Refuse a tag value whose lists, dicts and Python expressions nest more than
-/// `MAX_NESTING` levels, before the compiler walks it.
+/// Refuse a tag value that nests more than `MAX_NESTING` levels once filters
+/// are counted, before the compiler walks it.
 ///
-/// `parse_tag` never returns a deeper value, but Python code can build one by
-/// hand. The depth is read with a list of values still to visit, without
-/// recursion.
+/// `parse_tag` never returns a deeper value (see `check_tag_depth`), but
+/// Python code can build one by hand.
 ///
 /// Returns the deepest number of levels found, which sizes the stack for
 /// `with_stack_for_tree`.
 pub(crate) fn check_value_depth(value: &TagValue) -> Result<usize, CompileError> {
+    deepest_levels(value).map_err(|_| {
+        CompileError::Syntax(format!(
+            "This tag value nests lists, dicts, parentheses and filters more than \
+             {MAX_NESTING} levels deep, the most djc-core can compile. Build the deeper \
+             part in Python and pass it in as a variable."
+        ))
+    })
+}
+
+/// Refuse a parsed tag with a value that nests more than `MAX_NESTING` levels
+/// once filters are counted (see the module notes).
+pub(crate) fn check_tag_depth(input: &str, tag: &Tag) -> Result<(), ParseError> {
+    let values: Vec<&TagValue> = match tag {
+        Tag::Generic(generic) => generic.attrs.iter().map(|attr| &attr.value).collect(),
+        Tag::ForLoop(for_loop) => vec![&for_loop.iterable],
+        Tag::End(_) => Vec::new(),
+    };
+    for value in values {
+        if let Err(too_deep_value) = deepest_levels(value) {
+            // Point at the value that opens the level past the limit. Its
+            // offsets come from the grammar, so they are character
+            // boundaries; the fallback only guards against a future caller.
+            let token = &too_deep_value.value;
+            let span = Span::new(input, token.start_index, token.end_index)
+                .or_else(|| Span::new(input, 0, 0))
+                .expect("an empty span at 0 is always valid");
+            return Err(ParseError::from_span(span, too_deep_message()));
+        }
+    }
+    Ok(())
+}
+
+/// The deepest number of levels in `value`, counting each list, dict and
+/// Python expression, and each filter around everything it wraps in the
+/// Python that `tag_compiler.rs` writes. Returns the first value deeper than
+/// `MAX_NESTING` as the error.
+///
+/// The compiler writes `x|f:a|g:b` as `filter(g, filter(f, x, a), b)`: the
+/// value sits inside every filter, and the argument of a filter inside that
+/// filter and every filter after it. The tree is read with a list of values
+/// still to visit, without recursion.
+fn deepest_levels(value: &TagValue) -> Result<usize, &TagValue> {
     let mut deepest = 0;
     let mut to_visit = vec![(value, 0)];
     while let Some((value, levels_above)) = to_visit.pop() {
+        let filters = value.filters.len();
         let opens_level = matches!(
             value.kind,
             ValueKind::List | ValueKind::Dict | ValueKind::PythonExpr
         );
-        let levels = levels_above + usize::from(opens_level);
+        let levels = levels_above + filters + usize::from(opens_level);
         if levels > MAX_NESTING {
-            return Err(CompileError::Syntax(format!(
-                "This tag value nests lists, dicts and parentheses more than \
-                 {MAX_NESTING} levels deep, the most djc-core can compile. Build the \
-                 deeper part in Python and pass it in as a variable."
-            )));
+            return Err(value);
         }
         deepest = deepest.max(levels);
         to_visit.extend(
@@ -252,12 +310,19 @@ pub(crate) fn check_value_depth(value: &TagValue) -> Result<usize, CompileError>
                 .filter_map(ValueChild::as_value)
                 .map(|child| (child, levels)),
         );
+        // The argument of filter `index` sits inside it and the filters
+        // after it, plus one level when the argument is a list or dict.
         to_visit.extend(
             value
                 .filters
                 .iter()
-                .filter_map(|filter| filter.arg.as_ref())
-                .map(|arg| (arg, levels)),
+                .enumerate()
+                .filter_map(|(index, filter)| {
+                    filter
+                        .arg
+                        .as_ref()
+                        .map(|arg| (arg, levels_above + filters - index))
+                }),
         );
     }
     Ok(deepest)
@@ -288,14 +353,18 @@ pub(crate) fn with_stack_for_tree<T>(levels: usize, work: impl FnOnce() -> T) ->
 }
 
 fn too_deep(input: &str, offset: usize) -> ParseError {
-    error_at(
-        input,
-        offset,
-        format!(
-            "This tag nests lists, dicts and parentheses more than {MAX_NESTING} levels deep, \
-             the most djc-core can parse. Brackets inside strings and comments do not count. \
-             Build the deeper part in Python and pass it in as a variable."
-        ),
+    error_at(input, offset, too_deep_message())
+}
+
+/// The message for a tag that nests too deeply. The checks before and right
+/// after parsing count brackets only, and a tag they refuse nests too deeply
+/// by the rule this message states.
+fn too_deep_message() -> String {
+    format!(
+        "This tag nests lists, dicts, parentheses and filters more than {MAX_NESTING} \
+         levels deep, the most djc-core can compile. Each filter adds a level around the \
+         value before it. Brackets inside strings and comments do not count. Build the \
+         deeper part in Python and pass it in as a variable."
     )
 }
 

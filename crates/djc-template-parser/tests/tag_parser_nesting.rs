@@ -3,7 +3,10 @@
 //! The grammar and the AST builder call themselves once per `[`, `{` or `(`
 //! level. Without the checks in `src/nesting.rs`, 500 nested lists would
 //! crash a 256 KiB thread and 50,000 the main thread. A crash here ends the
-//! test binary, which still fails the run.
+//! test binary, which still fails the run. The Python that `compile_tag`
+//! writes also nests one call per filter, and CPython's compiler reads it, so
+//! filters count as levels too. The Python tests check that the deepest
+//! accepted tags compile in CPython on a small thread.
 
 use djc_template_parser::nesting::{MAX_BRACKETS, MAX_NESTING};
 use djc_template_parser::{compile_tag_attrs, parse_tag, ParseError, Tag};
@@ -11,21 +14,29 @@ use djc_template_parser::{compile_tag_attrs, parse_tag, ParseError, Tag};
 /// A 256 KiB stack, smaller than the usual default for a thread.
 const SMALL_STACK: usize = 256 * 1024;
 
-/// Ways to nest one level per `[`, `{` or `(`, each as (open, inner, close).
-const SHAPES: [(&str, &str, &str); 5] = [
-    ("[", "1", "]"),
-    ("{'a': ", "1", "}"),
-    ("[x|f:", "1", "]"),
-    ("{'a': x|f:", "1", "}"),
-    ("(", "1", ")"),
+/// Ways to nest, each as (open, inner, close, levels that one repeat adds).
+const SHAPES: [(&str, &str, &str, usize); 7] = [
+    ("[", "1", "]", 1),
+    ("{'a': ", "1", "}", 1),
+    ("(", "1", ")", 1),
+    // The filter wraps its argument, which holds the next level.
+    ("[x|f:", "1", "]", 2),
+    ("{'a': x|f:", "1", "}", 2),
+    // A filter chain with no brackets at all.
+    ("", "x", "|f", 1),
+    // The argument of `f` also sits inside both later filters.
+    ("[x|f:", "1", "|g|g]", 4),
 ];
 
-fn nested((open, inner, close): (&str, &str, &str), levels: usize) -> String {
+/// A tag with `shape` repeated until it is `levels` deep, or the first depth
+/// past `levels` the shape can reach.
+fn nested((open, inner, close, per_repeat): (&str, &str, &str, usize), levels: usize) -> String {
+    let repeats = levels.div_ceil(per_repeat);
     format!(
         "{{% component {}{}{} %}}",
-        open.repeat(levels),
+        open.repeat(repeats),
         inner,
-        close.repeat(levels)
+        close.repeat(repeats)
     )
 }
 
@@ -47,28 +58,26 @@ fn assert_too_deep(result: Result<Tag, ParseError>, tag: &str) {
 }
 
 #[test]
+fn every_shape_divides_the_limit() {
+    // Otherwise `nested(shape, MAX_NESTING)` would build a deeper tag.
+    for shape in SHAPES {
+        assert_eq!(MAX_NESTING % shape.3, 0, "{shape:?}");
+    }
+}
+
+#[test]
 fn the_deepest_accepted_tag_parses_and_compiles_on_a_small_thread() {
     on_stack(SMALL_STACK, || {
         for shape in SHAPES {
             let tag = nested(shape, MAX_NESTING);
-            // 64 nested `(` are one Python expression, which safe_eval
-            // refuses with its own limit; every other shape must parse.
-            match parse_tag(&tag, None) {
-                Ok(Tag::Generic(generic)) => {
-                    compile_tag_attrs(&generic.attrs).expect(&tag);
-                    // Comparing and freeing a value walk it one call per
-                    // level with no stack check. At 64 levels that stays
-                    // well within this thread, in debug builds too.
-                    let copy = generic.attrs.clone();
-                    assert_eq!(copy, generic.attrs, "{tag}");
-                }
-                Ok(_) => panic!("{tag}: not a generic tag"),
-                Err(error) => {
-                    let message = error.to_string();
-                    assert_eq!(shape.0, "(", "{tag}: {message}");
-                    assert!(message.contains("nested too deeply"), "{tag}: {message}");
-                }
-            }
+            let Ok(Tag::Generic(generic)) = parse_tag(&tag, None) else {
+                panic!("{tag}: not parsed as a generic tag");
+            };
+            compile_tag_attrs(&generic.attrs).expect(&tag);
+            // Comparing and freeing a value walk it one call per level with
+            // no stack check, which this thread has room for.
+            let copy = generic.attrs.clone();
+            assert_eq!(copy, generic.attrs, "{tag}");
         }
     });
 }
@@ -82,11 +91,23 @@ fn one_level_more_is_refused() {
 }
 
 #[test]
+fn only_the_filters_around_an_argument_count_for_it() {
+    // `x|f:[...]|g` writes `filter(g, filter(f, x, [...]), None)`: the list
+    // sits inside both filters. The argument of the last filter sits inside
+    // only that one, so a list one level deeper fits there.
+    let deep_list = |levels: usize| format!("{}1{}", "[".repeat(levels), "]".repeat(levels));
+    let first = format!("{{% component x|f:{}|g %}}", deep_list(MAX_NESTING - 1));
+    assert_too_deep(parse_tag(&first, None), &first);
+    let last = format!("{{% component x|g|f:{} %}}", deep_list(MAX_NESTING - 1));
+    assert!(parse_tag(&last, None).is_ok(), "{last}");
+}
+
+#[test]
 fn fifty_thousand_levels_fail_cleanly_on_any_thread() {
     for stack in [8 * 1024 * 1024, SMALL_STACK] {
         on_stack(stack, || {
             for shape in SHAPES {
-                let tag = nested(shape, 50_000);
+                let tag = nested(shape, 50_000 * shape.3);
                 assert_too_deep(parse_tag(&tag, None), &tag);
             }
         });
@@ -152,9 +173,9 @@ fn a_key_read_two_ways_still_fails_cleanly() {
 
 #[test]
 fn the_check_after_parsing_counts_parentheses_inside_an_expression() {
-    // 60 lists around 6 nested `(` are 66 levels in both checks, also when
+    // 11 lists around 6 nested `(` are 17 levels in both checks, also when
     // an attribute read two ways (`a(=1`) makes the first check stop.
-    let value = format!("{}((((((1)))))){}", "[".repeat(60), "]".repeat(60));
+    let value = format!("{}((((((1)))))){}", "[".repeat(11), "]".repeat(11));
     for tag in [
         format!("{{% component {value} %}}"),
         format!("{{% component a(=1 {value} %}}"),
@@ -171,18 +192,16 @@ fn the_deepest_accepted_value_can_be_copied_on_a_tiny_thread() {
     // stack is far smaller than any default. On Windows only about 33 KiB
     // of it is left when the thread starts: Rust reserves 20 KiB of each
     // thread it starts for its stack overflow handler, and `stacker` also
-    // leaves out the guard pages below that. 64 nested `(` are refused by
-    // safe_eval, so that shape is left out.
-    for shape in SHAPES.into_iter().filter(|shape| shape.0 != "(") {
+    // leaves out the guard pages below that.
+    for shape in SHAPES {
         let tag = nested(shape, MAX_NESTING);
         let Ok(Tag::Generic(generic)) = parse_tag(&tag, None) else {
             panic!("{tag}: not parsed as a generic tag");
         };
         let original = generic.attrs;
         // Only the copy runs on the tiny thread. Comparing and freeing the
-        // values have no stack check (in a debug build on Windows, comparing
-        // needs about 79 KB and freeing about 57 KB), so both happen back on
-        // this thread. The 256 KiB test above checks them on a small thread.
+        // values have no stack check, so both happen back on this thread.
+        // The 256 KiB test above checks them on a small thread.
         let (copy, original) = on_stack(64 * 1024, move || {
             let copy = original.clone();
             (copy, original)
