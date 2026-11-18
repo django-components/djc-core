@@ -303,8 +303,9 @@ def attribute(
     """Access an attribute of an object, e.g. `obj.attr`"""
     if not is_safe_attribute(obj, attr_name):
         error_msg = f"attribute '{attr_name}' on object '{type(obj)}' is unsafe"
-        # Name the replacement for the formatting methods, as a refused call does.
-        hint = unsafe_attribute_hint(attr_name)
+        # Name the replacement for the formatting methods and lazy objects, as a refused
+        # call does.
+        hint = unsafe_attribute_hint(obj, attr_name)
         if hint:
             error_msg += f". {hint}"
         raise SecurityError(error_msg)
@@ -345,10 +346,10 @@ def call(
         if replacement_message:
             error_msg += f". {replacement_message}"
         raise SecurityError(error_msg)
-    # A keyword that starts with `_` reaches a parameter the function keeps for itself. Each
-    # method of a Django lazy string takes `__method_name`, which picks the method that runs, so
-    # `text.upper(__method_name="format")` would run the refused `format`. `name=` and
-    # `**mapping` both arrive here, so one check covers both.
+    # A keyword that starts with `_` reaches a parameter the function keeps for itself. On
+    # Django 5.0 and later, each method of a lazy string takes `__method_name`, which picks
+    # the method that runs, so `text.upper(__method_name="format")` would run the refused
+    # `format`. `name=` and `**mapping` both arrive here, so one check covers both.
     if kwargs:
         # A key from a `**mapping` can be a `str` subclass whose own `startswith` or `__eq__`
         # lies about its text, and Python may bind it to a parameter by `__eq__`. Plain copies

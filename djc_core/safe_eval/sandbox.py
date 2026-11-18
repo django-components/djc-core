@@ -25,6 +25,12 @@ It refuses:
   `format_map` on a `str`, a `str` subclass such as `markupsafe.Markup`, or a
   `collections.UserString`, or any method of a `string.Formatter`, is refused, and so is
   building an `operator.attrgetter` or `operator.methodcaller`. Use f-strings instead.
+- Every attribute of a Django lazy object, such as a lazy string from `gettext_lazy()`, and
+  calling a method taken from one. Each method of a lazy object passes the call on to the
+  real value, so any of them can run `format`. Show the lazy string as it is, or turn it
+  into plain text with an f-string first, such as `f"{text}".upper()`. Django's
+  `format_lazy`, `format_html` and `format_html_join` are refused like `str.format`, and
+  so is a Django `lazy()` or `keep_lazy()` wrapper around a refused function.
 - Functions marked with `@unsafe` or `alters_data = True`.
 - Passing a function that the expression may not call as an argument of a call, such as
   `items.sort(key=obj.delete)`. A built-in like `list.sort` or `sorted` calls the function
@@ -96,6 +102,7 @@ import builtins
 import functools
 import operator
 import string
+import sys
 import types
 import weakref
 from collections import UserString
@@ -174,6 +181,36 @@ _FORMAT_METHOD_NAMES = frozenset({"format", "format_map"})
 _FORMATTER_METHOD_NAMES = frozenset(
     name for name in vars(string.Formatter) if not name.startswith("_")
 )
+
+# Django's lazy objects, such as the lazy string that `gettext_lazy()` returns, are not
+# `str`, so the checks above do not apply to them. Each of their methods passes the call on
+# to the real value: `lazy_text.format(obj)` runs `str.format` on the translated text. On
+# Django 5.0 and later, every method also takes a keyword argument that picks the real
+# method to run. So the sandbox refuses every attribute of a lazy object, and every method
+# taken from one.
+_LAZY_OBJECT_MESSAGE = (
+    "A Django lazy object, such as a lazy string from gettext_lazy(), passes each method call "
+    "on to its real value, so any of its methods can run format(). To call a string method, "
+    'turn it into plain text with an f-string first, such as f"{text}".upper().'
+)
+
+# The module where Django defines `Promise`, `lazy()` and `keep_lazy()`.
+_DJANGO_FUNCTIONAL_MODULE = "django.utils.functional"
+
+# Django's functions that format text by following the paths written in it, as `str.format`
+# does: each module, the function's name in it, and the name to show in the message.
+# `_format_lazy` is the function that `format_lazy` calls when its result is shown. The
+# expression can call one of them only if the app passes it in, so they are checked only
+# when called or passed to a call, by identity with the function in the loaded module.
+_DJANGO_FORMATTERS = (
+    ("django.utils.text", "format_lazy", "format_lazy"),
+    ("django.utils.text", "_format_lazy", "format_lazy"),
+    ("django.utils.html", "format_html", "format_html"),
+    ("django.utils.html", "format_html_join", "format_html_join"),
+)
+
+#: The modules in `_DJANGO_FORMATTERS`, so that other functions skip the lookups.
+_DJANGO_FORMATTER_MODULES = frozenset(module_name for module_name, _, _ in _DJANGO_FORMATTERS)
 
 #: Attribute names that need the extra string-type check in `is_safe_attribute`. Checking
 #: this set first keeps the extra `isinstance` calls off the path of every other name.
@@ -281,6 +318,91 @@ def _is_formatting_member(obj: Any, attr: str) -> bool:
     return attr in _FORMAT_METHOD_NAMES and derives_from((str, UserString))
 
 
+def _django_promise_class() -> Optional[type]:
+    """Return Django's `Promise` class, the base class of every lazy object, if Django is loaded."""
+    # djc-core does not depend on Django and must not import it. Django defines `Promise` in
+    # `django.utils.functional`, so no lazy object can exist before that module is imported,
+    # and while it stays imported, `sys.modules` holds it. Django itself relies on that one
+    # class staying the same (`isinstance(value, Promise)` throughout its code).
+    module = sys.modules.get(_DJANGO_FUNCTIONAL_MODULE)
+    promise = getattr(module, "Promise", None)
+    return promise if isinstance(promise, type) else None
+
+
+def _is_lazy(obj: Any, promise: type) -> bool:
+    """Test if `obj` is an instance of `promise`, or a subclass of it."""
+    if isinstance(obj, promise):
+        return True
+    return isinstance(obj, type) and issubclass(obj, promise)
+
+
+def _is_django_lazy(obj: Any) -> bool:
+    """
+    Test if `obj` is a Django lazy object, or the class of one.
+
+    A lazy object is an instance of `django.utils.functional.Promise`: the result of
+    `gettext_lazy()`, `format_lazy()`, `reverse_lazy()`, `lazy()` and `keep_lazy()`
+    functions such as `mark_safe()` given a lazy string. A `SimpleLazyObject` around one
+    counts too, because `isinstance` reads its `__class__`, which is that of the object
+    inside. The class counts as well, because its methods take a lazy object as their first
+    argument.
+    """
+    promise = _django_promise_class()
+    return promise is not None and _is_lazy(obj, promise)
+
+
+def _django_callable_refusal(obj: Any) -> Optional[str]:
+    """
+    Return the refusal message if calling `obj` runs Django code that can format text.
+
+    That is a lazy object or its class, a method bound to either, the function that Django
+    puts on the lazy class for each method of the real value, and the functions in
+    `_DJANGO_FORMATTERS`. The expression can't read a lazy object's methods, but the app may
+    pass one in, as `lazy_text.format`, inside a `functools.partial`, or taken from the
+    class (`type(lazy_text).format`), which is bound to no lazy object.
+    """
+    # A plain function is neither a lazy object nor bound to one, so it only needs the
+    # checks that read its code.
+    if type(obj) is types.FunctionType:
+        return _django_function_refusal(obj)
+    promise = _django_promise_class()
+    # Without `django.utils.functional` loaded there is no lazy object to find.
+    if promise is None:
+        return None
+    # Calling a lazy class builds a lazy object from the arguments, such as the text and
+    # values of `format_lazy()`, which formats that text when it is shown.
+    if _is_lazy(obj, promise) or _is_lazy(getattr(obj, "__self__", None), promise):
+        return _LAZY_OBJECT_MESSAGE
+    return None
+
+
+def _django_function_refusal(func: types.FunctionType) -> Optional[str]:
+    """Return the refusal message if `func` is a lazy object's method or a Django formatter."""
+    # The module whose globals the function runs with. Unlike `__module__`, `lazy()` and
+    # `functools.wraps` do not change it.
+    module_name = func.__globals__.get("__name__")
+    if module_name == _DJANGO_FUNCTIONAL_MODULE:
+        # The function that `lazy()` puts on the lazy class for each method of the real
+        # value is called `__wrapper__` and takes the lazy object as its first argument, in
+        # Django 4.2 to 6.1. The function that `lazy()` returns, such as `gettext_lazy`, is
+        # also called `__wrapper__` and takes only `*args` and `**kw`; `_call_targets` follows
+        # it to the function it wraps. This check reads only the code, so it holds even if
+        # `django.utils.functional` has left `sys.modules`.
+        code = func.__code__
+        if code.co_name == "__wrapper__" and code.co_argcount >= 1:
+            return _LAZY_OBJECT_MESSAGE
+        return None
+    if module_name in _DJANGO_FORMATTER_MODULES:
+        for formatter_module, name, shown_name in _DJANGO_FORMATTERS:
+            module = sys.modules.get(formatter_module)
+            if module is not None and getattr(module, name, None) is func:
+                return (
+                    f"{shown_name}() follows the attribute paths written in its text. Call "
+                    f"{shown_name}() in Python and pass the result in instead."
+                )
+    return None
+
+
 def is_safe_attribute(obj: Any, attr: str) -> bool:
     """
     Check if the attribute of an object is safe to access.
@@ -291,6 +413,9 @@ def is_safe_attribute(obj: Any, attr: str) -> bool:
     - The methods that format text by following paths inside it: `format` and
       `format_map` on `str`, `UserString` and their subclasses, and the methods of a
       `string.Formatter` (see `_is_formatting_member`).
+    - Every attribute of a Django lazy object or its class, such as a lazy string from
+      `gettext_lazy()` (see `_is_django_lazy`). Every method of a lazy object can run
+      `format` on the real value.
     """
     # Non-string subscripts should be fine, as they should be found only
     # as list slices.
@@ -298,14 +423,24 @@ def is_safe_attribute(obj: Any, attr: str) -> bool:
         return True
     if attr.startswith("_"):
         return False
+    # The whole lazy object is refused, not only `format` and `format_map`, because the
+    # object hides the type of its real value: `lazy()` gives it the methods of any class,
+    # so the sandbox can't tell from a name which method formats text.
+    if _is_django_lazy(obj):
+        return False
     # The name test comes first so that no other attribute pays for the `isinstance` calls.
     if attr in _FORMATTING_ATTRIBUTE_NAMES and _is_formatting_member(obj, attr):
         return False
     return not _is_internal_attribute(obj, attr)
 
 
-def unsafe_attribute_hint(attr: str) -> Optional[str]:
-    """Return advice to show with a refused attribute, or None when there is none."""
+def unsafe_attribute_hint(obj: Any, attr: str) -> Optional[str]:
+    """Return advice to show with a refused attribute of `obj`, or None when there is none."""
+    # A name that starts with `_` is refused for its name alone, whatever the object.
+    if attr.startswith("_"):
+        return None
+    if _is_django_lazy(obj):
+        return _LAZY_OBJECT_MESSAGE
     return _FORMAT_MESSAGE if attr in _FORMATTING_ATTRIBUTE_NAMES else None
 
 
@@ -372,6 +507,11 @@ def is_safe_callable(obj: Any) -> Tuple[bool, Optional[str]]:
     - Every method of a `string.Formatter` instance
     - `operator.attrgetter` and `operator.methodcaller`, which would let the template name
       the attribute to read
+    - A Django lazy object, its class, and every method taken from one, such as
+      `lazy_text.format` (see `_django_callable_refusal`)
+    - Django's `format_lazy`, `format_html` and `format_html_join`, which follow the paths
+      written in their text as `str.format` does, and a Django `lazy()` or `keep_lazy()`
+      wrapper around any refused function
     - One of these objects when it passes the call on to one of the above: a
       `functools.partial` or `functools.partialmethod`, a `staticmethod`, a
       `functools.lru_cache()` wrapper, a `types.GenericAlias` such as `list[int]`, a bound
@@ -416,6 +556,11 @@ def _check_one_callable(obj: Any) -> Optional[Tuple[bool, Optional[str]]]:
 
     if isinstance(obj, weakref.CallableProxyType):
         return (False, _WEAK_PROXY_MESSAGE)
+
+    # Django's lazy objects and formatting functions, found without importing Django.
+    django_refusal = _django_callable_refusal(obj)
+    if django_refusal is not None:
+        return (False, django_refusal)
 
     # Identity of the listed functions, such as `eval` or `str.format`.
     listed = _listed_refusal(obj)
@@ -472,6 +617,19 @@ def _call_targets(obj: Any) -> List[Any]:
         targets.append(obj.__func__)
     if isinstance(obj, _LRU_CACHE_WRAPPER_TYPE):
         targets.append(obj.__wrapped__)
+    # Django's `lazy()` and `keep_lazy()` return a function whose code calls the function it
+    # wraps with the same arguments, at once or when the lazy result is shown, and
+    # `functools.wraps` stores that function in `__wrapped__`. The check reads no other
+    # function's code, but these two are known to only pass the call on, as in
+    # `lazy(str.format, str)`.
+    if (
+        type(obj) is types.FunctionType
+        and obj.__code__.co_name in ("__wrapper__", "wrapper")
+        and obj.__globals__.get("__name__") == _DJANGO_FUNCTIONAL_MODULE
+    ):
+        wrapped = getattr(obj, "__wrapped__", None)
+        if wrapped is not None:
+            targets.append(wrapped)
     # Calling `list[int]` calls `list`. The origin is read through the type's own slot,
     # because a generic alias forwards most attribute reads to its origin.
     if type(obj) is types.GenericAlias:

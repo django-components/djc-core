@@ -40,6 +40,13 @@
   in `items.sort(key=obj.delete)`. Built-ins such as `list.sort` used to call it
   without any check. A `validate_callable` hook now also receives each function
   passed as an argument, including classes and lambdas.
+- `safe_eval()` now raises `SecurityError` when an expression reads any attribute
+  of a Django lazy object, such as a lazy string from `gettext_lazy()`, or calls a
+  lazy object's method that the app passed in. Each such method can run `format()`
+  on the real text. Showing a lazy string, comparing it, or passing it to a function
+  still works; to call a string method, write `f"{text}".upper()`. Calling
+  Django's `format_lazy()`, `format_html()` or `format_html_join()`, or a `lazy()`
+  or `keep_lazy()` wrapper around a refused function, is refused like `str.format`.
 - `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts and
   parentheses more than 64 levels deep, instead of crashing the process at a few
   thousand levels. Brackets inside strings and comments do not count. Tags nested

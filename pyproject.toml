@@ -40,10 +40,12 @@ Donate = "https://github.com/sponsors/EmilStenstrom"
 [dependency-groups]
 
 # Dev dependencies - install with `uv sync --group dev`
-dev = ["maturin", "pytest"]
+# Django is only for the tests that check how `safe_eval` treats Django's lazy strings.
+# djc-core itself does not depend on it.
+dev = ["django", "maturin", "pytest"]
 
 # CI dependencies - install with `uv sync --group ci`
-ci = ["maturin", "pytest"]
+ci = ["django", "maturin", "pytest"]
 
 ###########################################
 # BUILD TOOLS
