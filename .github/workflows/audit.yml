@@ -1,0 +1,36 @@
+name: Audit Rust dependencies
+
+# GitHub's dependency alerts do not read this repository's Cargo.lock, so
+# this job checks the Rust dependencies against the RustSec advisory database.
+# It runs weekly, because new advisories appear without any change here, and
+# on every change to Cargo.lock.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  push:
+    branches: [main]
+    paths: ["Cargo.lock", "Cargo.toml", ".github/workflows/audit.yml"]
+  pull_request:
+    paths: ["Cargo.lock", "Cargo.toml", ".github/workflows/audit.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      # Install a prebuilt cargo-audit rather than compiling it on every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # A vulnerability fails the job. "Unmaintained" notices, such as those for
+      # the unic-* crates that Ruff's parser brings in, are printed as warnings
+      # and do not fail it.
+      - name: Check Cargo.lock against RustSec
+        run: cargo audit
