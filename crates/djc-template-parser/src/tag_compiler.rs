@@ -146,7 +146,10 @@ pub fn compile_value(value: &TagValue) -> Result<String, CompileError> {
                 return Ok(content.to_string());
             };
             // Escape literal newlines so the string stays a valid single-line Python literal
-            let escaped = inner.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r");
+            let escaped = inner
+                .replace('\\', "\\\\")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
             Ok(format!("{}{}{}", quote_char, escaped, quote_char))
         }
         ValueKind::Variable => {

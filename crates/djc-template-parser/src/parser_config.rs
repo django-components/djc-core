@@ -6,7 +6,7 @@ use crate::ast::TemplateVersion;
 use pyo3::prelude::*;
 
 /// Basic metadata for a tag, e.g. `{% if %}`
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TagSpec {
     /// The tag name
@@ -29,7 +29,7 @@ impl TagSpec {
 ///
 /// Represents a sub-tag that splits the parent's tag body into multiple sections.
 /// For example, `{% elif %}` and `{% else %}` are sections for the `{% if %}` tag.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TagSectionSpec {
     /// The tag specification (name and flags)
@@ -54,7 +54,7 @@ impl TagSectionSpec {
 /// Metadata for a tag with body (and optionally extra sections).
 ///
 /// For example, `{% if %}` can contain `{% elif %}` and `{% else %}` sections.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TagWithBodySpec {
     /// The parent tag specification (name and flags)
@@ -92,7 +92,7 @@ impl TagWithBodySpec {
 /// - Wait for their closing end tag (e.g., `{% endif %}`)
 ///
 /// End tags always follow the pattern `{% end<tag> %}`
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TagConfig {
     /// Tag without a body (just a single tag)
@@ -132,7 +132,7 @@ impl TagConfig {
 ///
 /// This struct holds info on how the parser will parse the template / tags.
 /// It can be constructed from Python or Rust.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub struct ParserConfig {
     pub tags: HashMap<String, TagConfig>,
