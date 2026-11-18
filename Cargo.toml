@@ -17,6 +17,9 @@ documentation = "https://github.com/django-components/djc-core"
 repository = "https://github.com/django-components/djc-core"
 
 [workspace.dependencies]
+# Lets later work run passes on a stack that can grow. It builds C and
+# assembly through `psm` and `cc`, so every wheel target has to build it.
+stacker = "0.1.24"
 pyo3 = { version = "0.30.1", features = ["extension-module"] }
 pyo3-build-config = "0.30.1"
 quick-xml = "0.42.0"
