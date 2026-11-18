@@ -18,6 +18,12 @@
   interpolation's `expression` holds its source text.
 - A `safe_eval()` expression nested too deeply now raises `SyntaxError` instead
   of crashing the process.
+- `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts and
+  parentheses more than 64 levels deep, instead of crashing the process at a few
+  thousand levels. Brackets inside strings and comments do not count. Tags nested
+  65 to between about 1,300 and 3,600 levels, depending on what they nest, used to
+  parse and are now refused. A tag with more than 100,000 `(`, `[` and `{`
+  characters, counting those inside strings, is refused too.
 - A plain tag string can now hold its own quote as `\"` or `\'`, and a tag key can
   end in a backslash.
 

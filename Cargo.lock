@@ -395,6 +395,7 @@ dependencies = [
  "regex",
  "ruff_python_ast",
  "ruff_python_parser",
+ "stacker",
  "thiserror",
 ]
 

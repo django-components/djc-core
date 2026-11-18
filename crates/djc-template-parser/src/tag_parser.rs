@@ -36,6 +36,7 @@ use crate::ast::{
 };
 use crate::error::{assert_rule, assert_rules, ParseError};
 use crate::grammar::{GrammarParser, Rule};
+use crate::nesting;
 use crate::parser_context::ParserContext;
 use crate::utils::pest::span_from_str;
 
@@ -51,21 +52,31 @@ impl TagParser {
         let context = ParserContext::new(config)
             .map_err(|e| ParseError::Value(format!("Invalid parser config: {}", e)))?;
 
-        // tag_wrapper
-        let wrapper_pair = GrammarParser::parse(Rule::tag_wrapper, input)?
-            .next()
-            .ok_or_else(|| {
+        // The grammar and the AST builder call themselves once per bracket
+        // level, so the tag is checked before the grammar runs, and again
+        // before the AST builder walks the grammar's output.
+        let brackets = nesting::check_before_parse(input)?;
+
+        nesting::with_enough_stack(brackets, || {
+            // tag_wrapper
+            let pairs = GrammarParser::parse(Rule::tag_wrapper, input)?;
+            // The check above reads the tag as the grammar does, but cannot
+            // follow every attempt the grammar makes. The grammar's own output
+            // is exact, so check it again before the AST builder walks it.
+            nesting::check_parsed_depth(input, &pairs)?;
+            let wrapper_pair = pairs.into_iter().next().ok_or_else(|| {
                 ParseError::from_span(span_from_str(input), "Empty tag content".to_string())
             })?;
-        let wrapper_span = wrapper_pair.as_span();
+            let wrapper_span = wrapper_pair.as_span();
 
-        // tag_wrapper -> (django_tag | html_tag)
-        let tag_pair = wrapper_pair.into_inner().next().ok_or_else(|| {
-            ParseError::from_span(wrapper_span, "Tag wrapper is empty".to_string())
-        })?;
+            // tag_wrapper -> (django_tag | html_tag)
+            let tag_pair = wrapper_pair.into_inner().next().ok_or_else(|| {
+                ParseError::from_span(wrapper_span, "Tag wrapper is empty".to_string())
+            })?;
 
-        let tag = Self::parse_tag_inner(tag_pair, &context)?;
-        Ok((tag, context))
+            let tag = Self::parse_tag_inner(tag_pair, &context)?;
+            Ok((tag, context))
+        })
     }
 
     // Common path for both parsing entire template and single tag

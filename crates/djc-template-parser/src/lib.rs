@@ -3,6 +3,7 @@ use crate::tag_parser::TagParser;
 pub mod ast;
 pub mod error;
 pub mod grammar;
+pub mod nesting;
 pub mod parser_config;
 pub mod parser_context;
 pub mod tag_compiler;

@@ -378,7 +378,7 @@ impl Token {
 ///
 /// E.g. `my_var.item_count` is a variable, while `[1, 2, 3]` is a list of int literals, etc.
 #[pyclass(from_py_object)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub struct TagValue {
     /// Token containing the entire value span including filters and spread
     #[pyo3(get)]
@@ -402,6 +402,27 @@ pub struct TagValue {
     /// Context variables that this TagValue introduces
     #[pyo3(get)]
     pub assigned_variables: Vec<Token>,
+}
+
+// Copying a value copies its children and filter arguments, one call per
+// level. Python's attribute getters and `extract()` copy on the calling
+// thread's own stack, so on a small thread a deep value overflowed it. Each
+// level checks the stack first and moves to a new segment when it runs low.
+// Copying is pure Rust and never calls into Python, which a new segment
+// requires (see `nesting::with_enough_stack`).
+impl Clone for TagValue {
+    fn clone(&self) -> Self {
+        crate::nesting::with_stack_for_one_level(|| TagValue {
+            token: self.token.clone(),
+            value: self.value.clone(),
+            children: self.children.clone(),
+            kind: self.kind.clone(),
+            spread: self.spread.clone(),
+            filters: self.filters.clone(),
+            used_variables: self.used_variables.clone(),
+            assigned_variables: self.assigned_variables.clone(),
+        })
+    }
 }
 
 #[pymethods]

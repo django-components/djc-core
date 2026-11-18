@@ -280,6 +280,28 @@ Tag {
 }
 ```
 
+### Nesting limit
+
+`parse_tag()` raises `SyntaxError` for a tag that:
+
+- nests lists, dicts and parentheses more than 64 levels deep. Brackets
+  inside strings and `{# #}` comments do not count, and inside a Python
+  expression only `(` counts, because `safe_eval()` checks the rest of the
+  expression with its own limit;
+- or holds more than 100,000 `(`, `[` and `{` characters, counting those
+  inside strings.
+
+The grammar, the code that builds the AST, and the compiler call themselves
+once for each level a tag value opens, so a value nested tens of thousands of
+levels deep would overflow the stack and crash the process. Within these
+limits, a tag parses and compiles to Python source on a thread with as little
+as 128 KiB of stack, and its attributes can be read from Python there: the
+code asks for more stack when it needs it. On such a thread CPython's own
+compiler may raise `MemoryError` for the deepest filter arguments, and
+`repr()` of the deepest values needs about 96 KiB. `compile_tag()` refuses an
+AST built by hand that nests more than 64 levels. The checks live in
+`src/nesting.rs`.
+
 ## On template tag compilation
 
 Another important part is the "tag compiler". This turns the parsed AST into an executable Python function. When this function is called with the `Context` object, it resolves the inputs to a tag into Python args and kwargs.
