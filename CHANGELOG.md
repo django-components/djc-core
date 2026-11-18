@@ -33,13 +33,13 @@
 - A keyword argument named `func` in a `safe_eval()` call now reaches the called
   function instead of raising `TypeError`.
 - `safe_eval()` now raises `SecurityError` when an expression reads `format` or
-  `format_map` on a `str`, a `str` subclass or a `UserString`, even without calling
-  it. Use an f-string instead.
-- `safe_eval()` now raises `SecurityError` when an expression passes a function it
-  may not call, such as a Django model's `delete`, to another function, as in
-  `items.sort(key=obj.delete)`. Built-ins such as `list.sort` used to run it. A
-  `validate_callable` hook now also receives each function passed as an argument,
-  including classes and lambdas.
+  `format_map` on a `str`, a `UserString` or a subclass of either, even without
+  calling it. Calling them was already refused. Use an f-string instead.
+- `safe_eval()` now raises `SecurityError` when an expression passes a function
+  that it may not call, such as a Django model's `delete`, to another function, as
+  in `items.sort(key=obj.delete)`. Built-ins such as `list.sort` used to call it
+  without any check. A `validate_callable` hook now also receives each function
+  passed as an argument, including classes and lambdas.
 - `parse_tag()` now raises `SyntaxError` for a tag that nests lists, dicts and
   parentheses more than 64 levels deep, instead of crashing the process at a few
   thousand levels. Brackets inside strings and comments do not count. Tags nested

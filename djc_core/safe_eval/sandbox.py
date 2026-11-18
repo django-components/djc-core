@@ -26,10 +26,11 @@ It refuses:
   `collections.UserString`, or any method of a `string.Formatter`, is refused, and so is
   building an `operator.attrgetter` or `operator.methodcaller`. Use f-strings instead.
 - Functions marked with `@unsafe` or `alters_data = True`.
-- Passing a function that the expression may not call directly as an argument of a call,
-  such as `items.sort(key=obj.delete)`. A built-in like `list.sort` or `sorted` calls the
-  function it is given without these checks, so the check runs when the expression hands
-  it over. A function inside a list, tuple or dict argument is not checked.
+- Passing a function that the expression may not call as an argument of a call, such as
+  `items.sort(key=obj.delete)`. A built-in like `list.sort` or `sorted` calls the function
+  it is given without these checks, so the check runs when the expression hands it over.
+  Only a function given directly as an argument is checked; a function inside a list,
+  tuple or dict argument is not.
 
 What the sandbox does not promise
 ---------------------------------
@@ -43,11 +44,11 @@ It is a second layer of protection. It does not make a template from a stranger 
 - It checks only the lookups and calls that the expression text writes, and the functions
   that a call receives directly as arguments. A function that you pass in and that looks up
   names from text, or calls functions it finds inside a list or another object, does so
-  without these checks. Examples are `map` and `functools.reduce` (which can be given
-  themselves, as in `map(map, [f], [[x]])`), `itertools.starmap`, `operator.call`, `type`
-  with three arguments (it builds a class from a dict of functions), a `getattr`-style
-  helper, `inspect`, `importlib`, and `logging.Formatter` with `{` style. Do not pass such
-  helpers in.
+  without these checks. Examples are `map` and `functools.reduce` (`map` can be given
+  itself as the function to call, as in `map(map, [f], [[x]])`), `itertools.starmap`,
+  `operator.call`, `type` with three arguments (it builds a class from a dict of
+  functions), a `getattr`-style helper, `inspect`, `importlib`, and `logging.Formatter`
+  with `{` style. Do not pass such helpers in.
 - It hides an item key that starts with `_` only when the expression writes the lookup
   itself. `data["_key"]` is refused, but `data.get("_key")`, iterating over `data`, and
   `"%(_key)s" % data` read the same item.
@@ -179,10 +180,11 @@ _FORMATTER_METHOD_NAMES = frozenset(
 _FORMATTING_ATTRIBUTE_NAMES = _FORMAT_METHOD_NAMES | _FORMATTER_METHOD_NAMES
 
 # The functions below are what a class lookup returns, such as `UserString.format`. The
-# expression can't read them, but the app may pass one in, so they are refused by identity
-# when called or passed to a call. A subclass's own override (`Markup.format`) is a different function that can't
-# be listed ahead of time, so `is_safe_attribute` refuses it by the type of the object it is
-# read from, and `_formatting_method_message` refuses a bound one by its owner.
+# expression can't read them, but the app may pass one in, so they are refused by
+# identity when called or passed to a call. A subclass's own override (`Markup.format`)
+# is a different function that can't be listed ahead of time, so `is_safe_attribute`
+# refuses it by the type of the object it is read from, and `_formatting_method_message`
+# refuses a bound one by its owner.
 UNSAFE_FUNCTIONS: Dict[Any, Optional[str]] = {
     str.format: _FORMAT_MESSAGE,
     str.format_map: _FORMAT_MESSAGE,

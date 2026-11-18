@@ -369,9 +369,10 @@ def call(
     # `sorted` or `map` does that without coming back through this helper. So a function
     # that the expression may not call is refused here, when the expression hands it over.
     # The arguments are the final ones, after `*args` and `**mapping` are unpacked. A
-    # function inside a list or dict argument is not looked for: that would cost time in
-    # proportion to the container on every call, and the docs tell apps not to pass the
-    # helpers, such as `map(map, ...)`, that call functions found that way.
+    # function inside a list, tuple or dict argument is not looked for: that would cost
+    # time in proportion to the container on every call, and the docs tell apps not to
+    # pass the helpers, such as `map`, that call functions found that way (for example
+    # `map(map, ...)`).
     for value in chain(args, kwargs.values()):
         # `callable()` reads only the type, so a value that can't be called adds only this
         # one cheap test.
